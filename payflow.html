@@ -436,29 +436,42 @@ async function loadView(id) {
 
 // ── EMPRESA: DASHBOARD ──
 async function renderDashboard() {
-  const [pagCliRes, enviosRes, perfilesRes] = await Promise.all([
-    db.from('pagos_cliente').select('monto, estado, created_at').order('created_at', { ascending: false }),
+  const [pagCliRes, enviosRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*)').order('created_at', { ascending: false }),
-    db.from('profiles').select('rol').eq('rol', 'cliente'),
   ]);
 
   const pagos = pagCliRes.data || [];
   const envios = enviosRes.data || [];
 
-  const totalRecibidoClientes = pagos.reduce((s,p) => s + Number(p.monto), 0);
+  const totalRecibidoClientes = pagos.filter(p=>p.estado==='confirmado').reduce((s,p) => s + Number(p.monto), 0);
   const totalEnviadoEmpresa = envios.reduce((s,e) => s + Number(e.monto_total), 0);
   const enPoderIntermediario = totalRecibidoClientes - totalEnviadoEmpresa;
-
   const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
-  const ultimoEnvio = envios[0];
+
+  // Calcular promedio de dias desde que cliente informa hasta que intermediario envia
+  // Para cada envio, buscamos pagos confirmados anteriores al envio
+  let tiempos = [];
+  envios.forEach(e => {
+    const fechaEnvio = new Date(e.created_at);
+    pagos.filter(p => p.estado === 'confirmado' && new Date(p.created_at) <= fechaEnvio).forEach(p => {
+      const dias = (fechaEnvio - new Date(p.created_at)) / (1000 * 60 * 60 * 24);
+      tiempos.push(dias);
+    });
+  });
+  const promedioDias = tiempos.length > 0 ? (tiempos.reduce((s,t) => s+t, 0) / tiempos.length) : null;
+  const promedioHoras = promedioDias !== null ? (promedioDias * 24) : null;
+  const promedioLabel = promedioDias === null ? 'Sin datos' : promedioDias < 1 ? Math.round(promedioHoras) + 'hs' : promedioDias.toFixed(1) + 'd';
+  const promedioOk = promedioDias !== null && promedioDias <= 3;
 
   const c = document.getElementById('main-content');
   c.innerHTML =
     (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aun no fueron enviados a la empresa.</div></div>' : '') +
-    '<div class="metrics">' +
+    '<div class="metrics" style="grid-template-columns:repeat(4,1fr);">' +
     '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido - enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Total recibido de clientes</div><div class="metric-value">USD ' + fmt(totalRecibidoClientes) + '</div><div class="metric-sub">confirmado por intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
+    '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
     '</div>' +
 
     '<div class="grid-2 section-gap">' +
@@ -467,7 +480,7 @@ async function renderDashboard() {
     (pagos.slice(0,5).length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
       pagos.slice(0,5).map(p =>
         '<div class="pago-row" style="padding:10px 18px">' +
-        '<div class="pago-info"><div class="pago-name">' + (p.nombre_cliente||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
         '</div>'
@@ -551,54 +564,70 @@ function toggleDetalle(id) {
 
 async function exportarExcel() {
   const [pagRes, envRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
-    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: true }),
   ]);
 
   const pagos = pagRes.data || [];
   const envios = envRes.data || [];
 
-  let csv = 'PAGOS DE CLIENTES\n';
-  csv += 'Fecha,Cliente,Monto USD,Forma de pago,Referencia,Estado,Comprobante\n';
-  pagos.forEach(p => {
+  // Construir cuenta corriente intermediario-empresa
+  // Debitos: pagos recibidos de clientes (confirmados) = lo que el intermediario tiene que enviarnos
+  // Creditos: envios a la empresa = lo que ya nos envio
+  let movimientos = [];
+
+  pagos.filter(p => p.estado === 'confirmado').forEach(p => {
+    movimientos.push({
+      fecha: new Date(p.created_at),
+      tipo: 'COBRO DE CLIENTE',
+      detalle: (p.profiles?.nombre||'-') + (p.referencia ? ' - ' + p.referencia : ''),
+      debe: Number(p.monto),
+      haber: 0,
+    });
+  });
+
+  envios.forEach(e => {
+    const det = (e.detalle_envio||[]).map(d => (d.profiles?.nombre||'-') + ': USD ' + d.monto).join(' | ');
+    movimientos.push({
+      fecha: new Date(e.created_at),
+      tipo: 'ENVIO A EMPRESA',
+      detalle: e.medio + (e.referencia ? ' - ' + e.referencia : '') + (det ? ' | ' + det : ''),
+      debe: 0,
+      haber: Number(e.monto_total),
+    });
+  });
+
+  movimientos.sort((a,b) => a.fecha - b.fecha);
+
+  let saldo = 0;
+  let csv = 'CUENTA CORRIENTE - INTERMEDIARIO vs EMPRESA\n';
+  csv += 'Generado: ' + new Date().toLocaleString('es-AR') + '\n\n';
+  csv += 'Fecha,Hora,Tipo,Detalle,Debe USD,Haber USD,Saldo USD\n';
+
+  movimientos.forEach(m => {
+    saldo += m.debe - m.haber;
     csv += [
-      new Date(p.created_at).toLocaleString('es-AR'),
-      (p.profiles?.nombre||'-'),
-      p.monto,
-      p.forma_pago,
-      p.referencia||'',
-      p.estado,
-      p.comprobante_url||''
+      m.fecha.toLocaleDateString('es-AR'),
+      m.fecha.toLocaleTimeString('es-AR'),
+      m.tipo,
+      m.detalle,
+      m.debe > 0 ? m.debe.toFixed(2) : '',
+      m.haber > 0 ? m.haber.toFixed(2) : '',
+      saldo.toFixed(2)
     ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
   });
 
-  csv += '\nENVIOS DEL INTERMEDIARIO\n';
-  csv += 'Fecha,Medio,Referencia,Monto total USD,Cliente,Monto cliente USD,Nota\n';
-  envios.forEach(e => {
-    const det = e.detalle_envio || [];
-    if (det.length === 0) {
-      csv += [new Date(e.created_at).toLocaleString('es-AR'), e.medio, e.referencia||'', e.monto_total, '', '', ''].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
-    } else {
-      det.forEach((d, i) => {
-        csv += [
-          i === 0 ? new Date(e.created_at).toLocaleString('es-AR') : '',
-          i === 0 ? e.medio : '',
-          i === 0 ? (e.referencia||'') : '',
-          i === 0 ? e.monto_total : '',
-          d.profiles?.nombre||'-',
-          d.monto,
-          d.nota||''
-        ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
-      });
-    }
-  });
+  csv += '\n';
+  const totalDebe = movimientos.reduce((s,m) => s + m.debe, 0);
+  const totalHaber = movimientos.reduce((s,m) => s + m.haber, 0);
+  csv += '"TOTALES","","","","' + totalDebe.toFixed(2) + '","' + totalHaber.toFixed(2) + '","' + (totalDebe - totalHaber).toFixed(2) + '"\n';
 
   const BOM = '\uFEFF';
   const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'payflow_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.download = 'cuenta_corriente_intermediario_' + new Date().toISOString().split('T')[0] + '.csv';
   a.click();
   URL.revokeObjectURL(url);
 }
