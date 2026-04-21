@@ -549,8 +549,58 @@ function toggleDetalle(id) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-function exportarExcel() {
-  alert('Exportacion a Excel disponible proximamente.');
+async function exportarExcel() {
+  const [pagRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
+  ]);
+
+  const pagos = pagRes.data || [];
+  const envios = envRes.data || [];
+
+  let csv = 'PAGOS DE CLIENTES\n';
+  csv += 'Fecha,Cliente,Monto USD,Forma de pago,Referencia,Estado,Comprobante\n';
+  pagos.forEach(p => {
+    csv += [
+      new Date(p.created_at).toLocaleString('es-AR'),
+      (p.profiles?.nombre||'-'),
+      p.monto,
+      p.forma_pago,
+      p.referencia||'',
+      p.estado,
+      p.comprobante_url||''
+    ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
+  });
+
+  csv += '\nENVIOS DEL INTERMEDIARIO\n';
+  csv += 'Fecha,Medio,Referencia,Monto total USD,Cliente,Monto cliente USD,Nota\n';
+  envios.forEach(e => {
+    const det = e.detalle_envio || [];
+    if (det.length === 0) {
+      csv += [new Date(e.created_at).toLocaleString('es-AR'), e.medio, e.referencia||'', e.monto_total, '', '', ''].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
+    } else {
+      det.forEach((d, i) => {
+        csv += [
+          i === 0 ? new Date(e.created_at).toLocaleString('es-AR') : '',
+          i === 0 ? e.medio : '',
+          i === 0 ? (e.referencia||'') : '',
+          i === 0 ? e.monto_total : '',
+          d.profiles?.nombre||'-',
+          d.monto,
+          d.nota||''
+        ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
+      });
+    }
+  });
+
+  const BOM = '\uFEFF';
+  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'payflow_' + new Date().toISOString().split('T')[0] + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── EMPRESA: PAGOS CLIENTES ──
@@ -566,6 +616,7 @@ async function renderPagosClientes() {
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
+        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Ver comprobante</a>' : '<span style="font-size:11px;color:var(--text3)">Sin comprobante</span>') +
         '</div>'
       ).join('')
     ) + '</div>';
