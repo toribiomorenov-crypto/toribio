@@ -694,7 +694,10 @@ function actualizarTotal() {
   const envMonto = parseFloat(document.getElementById('env-monto')?.value)||0;
   const diff = envMonto - total;
   const el = document.getElementById('env-total-check');
-  if (el) el.textContent = 'Suma de clientes: USD ' + fmt(total) + (envMonto > 0 ? ' / Total envio: USD ' + fmt(envMonto) + (Math.abs(diff) < 0.01 ? ' - OK' : ' - Diferencia: USD ' + fmt(diff)) : '');
+  if (!el) return;
+  const ok = Math.abs(diff) < 0.01;
+  el.style.color = envMonto > 0 ? (ok ? 'var(--green)' : 'var(--red)') : 'var(--text3)';
+  el.textContent = 'Suma de clientes: USD ' + fmt(total) + (envMonto > 0 ? ' / Total envio: USD ' + fmt(envMonto) + (ok ? ' - Montos coinciden' : ' - Diferencia: USD ' + fmt(Math.abs(diff))) : '');
 }
 
 async function registrarEnvio() {
@@ -713,6 +716,12 @@ async function registrarEnvio() {
   });
 
   if (lineas.length === 0) { alert('Agrega al menos un cliente con monto.'); return; }
+
+  const sumaLineas = lineas.reduce((s,l) => s + l.monto, 0);
+  if (Math.abs(monto - sumaLineas) > 0.01) {
+    alert('El monto total (USD ' + fmt(monto) + ') no coincide con la suma de clientes (USD ' + fmt(sumaLineas) + '). Corregilo antes de continuar.');
+    return;
+  }
 
   const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref }).select().single();
   if (error) { alert('Error al registrar.'); return; }
@@ -825,10 +834,25 @@ async function informarPago() {
   const fecha = document.getElementById('cp-fecha').value;
   const forma = document.getElementById('cp-forma').value;
   const ref = document.getElementById('cp-ref').value;
+  const fileInput = document.getElementById('cp-file');
+  const file = fileInput?.files[0];
   if (!monto || !fecha) { alert('Completa monto y fecha.'); return; }
 
-  const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, estado: 'pendiente' });
-  if (error) { alert('Error al registrar: ' + error.message); return; }
+  const btn = document.querySelector('[onclick="informarPago()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+  let comprobante_url = null;
+  if (file) {
+    const ext = file.name.split('.').pop();
+    const path = currentUser.id + '/' + Date.now() + '.' + ext;
+    const { data: uploaded, error: upErr } = await db.storage.from('comprobantes').upload(path, file);
+    if (upErr) { alert('Error al subir comprobante: ' + upErr.message); if (btn) { btn.disabled = false; btn.textContent = 'Enviar informe de pago'; } return; }
+    const { data: urlData } = db.storage.from('comprobantes').getPublicUrl(path);
+    comprobante_url = urlData.publicUrl;
+  }
+
+  const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, comprobante_url, estado: 'pendiente' });
+  if (error) { alert('Error al registrar: ' + error.message); if (btn) { btn.disabled = false; btn.textContent = 'Enviar informe de pago'; } return; }
 
   const msg = document.getElementById('cp-msg');
   msg.textContent = 'Pago informado correctamente. El intermediario lo confirmara a la brevedad.';
