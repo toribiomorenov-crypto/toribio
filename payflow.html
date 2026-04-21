@@ -301,11 +301,10 @@ const db = createClient(SUPA_URL, SUPA_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-let activeOrderId = null;
-let activePagoId = null;
 let cuentasCache = null;
+let activeModalData = {};
 
-// SHEETS PARSER
+// SHEETS
 async function fetchCuentas() {
   if (cuentasCache) return cuentasCache;
   try {
@@ -313,7 +312,7 @@ async function fetchCuentas() {
     const text = await res.text();
     cuentasCache = parseCuentas(text);
     return cuentasCache;
-  } catch(e) { return null; }
+  } catch(e) { return {}; }
 }
 
 function parseCuentas(csv) {
@@ -328,12 +327,7 @@ function parseCuentas(csv) {
       current = { codigo: cod, nombre: cols[1], vencido: parseFloat(cols[2])||0, saldo: parseFloat(cols[3])||0, facturas: [] };
       clientes[cod] = current;
     } else if (current && ['Factura','Nota de Débito','Nota de Crédito'].includes(cols[0])) {
-      current.facturas.push({
-        tipo: cols[0], nro: cols[1],
-        fecha: excelDate(parseInt(cols[2])), vto: excelDate(parseInt(cols[3])),
-        diasVencidos: parseInt(cols[4])||0,
-        total: parseFloat(cols[5])||0, saldo: parseFloat(cols[6])||0,
-      });
+      current.facturas.push({ tipo: cols[0], nro: cols[1], fecha: excelDate(parseInt(cols[2])), vto: excelDate(parseInt(cols[3])), diasVencidos: parseInt(cols[4])||0, total: parseFloat(cols[5])||0, saldo: parseFloat(cols[6])||0 });
     }
   }
   return clientes;
@@ -342,12 +336,6 @@ function parseCuentas(csv) {
 function excelDate(serial) {
   if (!serial || isNaN(serial)) return '-';
   return new Date((serial - 25569) * 86400000).toLocaleDateString('es-AR');
-}
-
-function getCuentaByNombre(cuentas, nombre) {
-  if (!cuentas || !nombre) return null;
-  const n = nombre.toUpperCase().trim();
-  return Object.values(cuentas).find(c => c.nombre.toUpperCase().trim() === n) || null;
 }
 
 // AUTH
@@ -373,29 +361,17 @@ async function initApp(user) {
   currentUser = user;
   const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
   if (error || !profile) {
-    const { data: newProfile, error: insertError } = await db.from('profiles').upsert({
-      id: user.id,
-      nombre: user.user_metadata?.nombre || user.email.split('@')[0],
-      email: user.email,
-      rol: user.user_metadata?.rol || 'empresa'
-    }, { onConflict: 'id' }).select().single();
-    if (insertError || !newProfile) {
-      const errEl = document.getElementById('login-error');
-      showErr(errEl, 'Error al cargar perfil: ' + (insertError?.message || 'desconocido'));
-      document.getElementById('login-screen').style.display = 'flex';
-      document.getElementById('app-screen').style.display = 'none';
-      return;
-    }
+    const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
+    if (ie || !newProfile) { showErr(document.getElementById('login-error'), 'Error al cargar perfil.'); return; }
     currentProfile = newProfile;
-  } else {
-    currentProfile = profile;
-  }
+  } else { currentProfile = profile; }
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
   document.getElementById('sidebar-rol').textContent = currentProfile.rol;
   buildSidebar(currentProfile.rol);
-  loadView(currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'pagador-home' : 'cliente-home');
+  const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
+  loadView(defaultView);
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
@@ -408,19 +384,19 @@ function buildSidebar(rol) {
   const menus = {
     empresa: [
       { id:'dashboard', label:'Dashboard' },
+      { id:'control-intermediario', label:'Control intermediario' },
+      { id:'pagos-clientes', label:'Pagos de clientes' },
       { id:'saldos-erp', label:'Saldos ERP' },
-      { id:'pagos', label:'Pagos' },
-      { id:'pagador-cuenta', label:'Cuenta del pagador' },
       { id:'usuarios', label:'Usuarios' },
     ],
     pagador: [
-      { id:'pagador-home', label:'Pagos a confirmar' },
-      { id:'pagador-liquidar', label:'Liquidar a empresa' },
-      { id:'pagador-historial', label:'Historial' },
+      { id:'int-home', label:'Pagos recibidos' },
+      { id:'int-enviar', label:'Enviar a empresa' },
+      { id:'int-historial', label:'Mi historial' },
     ],
     cliente: [
-      { id:'cliente-home', label:'Mi cuenta' },
-      { id:'cliente-pagar', label:'Reportar pago' },
+      { id:'cli-home', label:'Mi cuenta' },
+      { id:'cli-pagar', label:'Informar pago' },
     ],
   };
   const items = menus[rol] || [];
@@ -434,208 +410,248 @@ function setActiveNav(id) {
   if (el) el.classList.add('active');
 }
 
-// VIEWS
+// ROUTER
 async function loadView(id) {
   setActiveNav(id);
-  const content = document.getElementById('main-content');
-  content.innerHTML = '<div class="loading">Cargando...</div>';
+  document.getElementById('main-content').innerHTML = '<div class="loading">Cargando...</div>';
   const titles = {
-    'dashboard': ['Dashboard', 'Resumen general de pagos'],
+    'dashboard': ['Dashboard', 'Vision general del negocio'],
+    'control-intermediario': ['Control del intermediario', 'Seguimiento de fondos en poder del intermediario'],
+    'pagos-clientes': ['Pagos de clientes', 'Historial de pagos informados por clientes'],
     'saldos-erp': ['Saldos ERP', 'Cuentas a cobrar desde Open Orange'],
-    'pagos': ['Pagos', 'Historial de pagos recibidos'],
-    'pagador-cuenta': ['Cuenta del pagador', 'Saldo y liquidaciones'],
     'usuarios': ['Usuarios', 'Gestion de accesos'],
-    'pagador-home': ['Pagos a confirmar', 'Confirma los cobros recibidos'],
-    'pagador-liquidar': ['Liquidar a empresa', 'Registra envios de dinero'],
-    'pagador-historial': ['Historial', 'Envios realizados'],
-    'cliente-home': ['Mi cuenta', 'Tu saldo y facturas'],
-    'cliente-pagar': ['Reportar pago', 'Notifica un pago al pagador'],
+    'int-home': ['Pagos recibidos', 'Registra cobros de clientes'],
+    'int-enviar': ['Enviar a empresa', 'Informa transferencias a la empresa'],
+    'int-historial': ['Mi historial', 'Todos tus movimientos'],
+    'cli-home': ['Mi cuenta', 'Tu saldo y estado de pagos'],
+    'cli-pagar': ['Informar pago', 'Notifica un pago al intermediario'],
   };
   const [title, sub] = titles[id] || ['Panel', ''];
   document.getElementById('page-title').textContent = title;
   document.getElementById('page-subtitle').textContent = sub;
 
-  if (id === 'dashboard') await renderDashboard();
-  else if (id === 'saldos-erp') await renderSaldosERP();
-  else if (id === 'pagos') await renderPagos();
-  else if (id === 'pagador-cuenta') await renderPagadorCuenta();
-  else if (id === 'usuarios') await renderUsuarios();
-  else if (id === 'pagador-home') await renderPagadorHome();
-  else if (id === 'pagador-liquidar') await renderPagadorLiquidar();
-  else if (id === 'pagador-historial') await renderPagadorHistorial();
-  else if (id === 'cliente-home') await renderClienteHome();
-  else if (id === 'cliente-pagar') await renderClientePagar();
+  const views = { 'dashboard': renderDashboard, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'saldos-erp': renderSaldosERP, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
+  if (views[id]) await views[id]();
 }
 
-// EMPRESA: DASHBOARD
+// ── EMPRESA: DASHBOARD ──
 async function renderDashboard() {
-  const [pagoRes, liqRes, ordenRes, pendRes] = await Promise.all([
-    db.from('pagos').select('monto').eq('estado','confirmado'),
-    db.from('liquidaciones').select('monto'),
-    db.from('ordenes').select('*').eq('estado','pago_confirmado'),
-    db.from('pagos').select('*').eq('estado','pendiente'),
+  const [pagCliRes, enviosRes, perfilesRes] = await Promise.all([
+    db.from('pagos_cliente').select('monto, estado, created_at').order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(*)').order('created_at', { ascending: false }),
+    db.from('profiles').select('rol').eq('rol', 'cliente'),
   ]);
-  const totalConf = (pagoRes.data||[]).reduce((s,p) => s+Number(p.monto), 0);
-  const totalLiq = (liqRes.data||[]).reduce((s,l) => s+Number(l.monto), 0);
-  const saldo = totalConf - totalLiq;
-  const ordenes = ordenRes.data || [];
-  const pendientes = pendRes.data || [];
-  const c = document.getElementById('main-content');
-  c.innerHTML =
-    (saldo > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>Saldo pendiente del pagador:</strong> USD ' + fmt(saldo) + ' sin liquidar.</div></div>' : '') +
-    '<div class="metrics">' +
-    '<div class="metric"><div class="metric-label">Saldo pendiente pagador</div><div class="metric-value ' + (saldo>0?'danger':'ok') + '">USD ' + fmt(saldo) + '</div><div class="metric-sub">confirmado sin liquidar</div></div>' +
-    '<div class="metric"><div class="metric-label">Ordenes a liberar</div><div class="metric-value">' + ordenes.length + '</div><div class="metric-sub">pago confirmado</div></div>' +
-    '<div class="metric"><div class="metric-label">Pagos pendientes</div><div class="metric-value">' + pendientes.length + '</div><div class="metric-sub">esperando confirmacion</div></div>' +
-    '</div>' +
-    '<div class="card section-gap"><div class="card-header"><div class="card-title">Ordenes a liberar</div></div><div>' +
-    (ordenes.length === 0 ? '<div class="empty-state">No hay ordenes pendientes de liberar.</div>' :
-      ordenes.map(o =>
-        '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">Orden #' + o.numero + '</div><div class="pago-sub">Pago confirmado por el pagador</div></div>' +
-        '<div class="pago-amount">USD ' + fmt(o.monto) + '</div>' +
-        '<span class="badge badge-confirmed">Confirmado</span>' +
-        '<button class="btn btn-primary btn-sm" onclick="abrirLiberarOrden(\'' + o.id + '\',\'' + o.numero + '\',\'' + o.monto + '\')">Liberar</button>' +
-        '</div>'
-      ).join('')) +
-    '</div></div>';
-}
 
-// EMPRESA: SALDOS ERP
-async function renderSaldosERP() {
+  const pagos = pagCliRes.data || [];
+  const envios = enviosRes.data || [];
+
+  const totalRecibidoClientes = pagos.reduce((s,p) => s + Number(p.monto), 0);
+  const totalEnviadoEmpresa = envios.reduce((s,e) => s + Number(e.monto_total), 0);
+  const enPoderIntermediario = totalRecibidoClientes - totalEnviadoEmpresa;
+
+  const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
+  const ultimoEnvio = envios[0];
+
   const c = document.getElementById('main-content');
-  c.innerHTML = '<div class="loading">Cargando datos del ERP...</div>';
-  const cuentas = await fetchCuentas();
-  if (!cuentas) {
-    c.innerHTML = '<div class="alert alert-danger"><span class="alert-icon">!</span><div>No se pudieron cargar los datos del ERP. Verificá que el Google Sheet este publicado correctamente.</div></div>';
-    return;
-  }
-  const lista = Object.values(cuentas);
-  const totalSaldo = lista.reduce((s,cl) => s + cl.saldo, 0);
-  const totalVencido = lista.reduce((s,cl) => s + cl.vencido, 0);
   c.innerHTML =
+    (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aun no fueron enviados a la empresa.</div></div>' : '') +
     '<div class="metrics">' +
-    '<div class="metric"><div class="metric-label">Total saldo a cobrar</div><div class="metric-value danger">USD ' + fmt(totalSaldo) + '</div><div class="metric-sub">' + lista.length + ' clientes</div></div>' +
-    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value danger">USD ' + fmt(totalVencido) + '</div><div class="metric-sub">dias vencidos</div></div>' +
-    '<div class="metric"><div class="metric-label">Ultima actualizacion</div><div class="metric-value" style="font-size:14px">' + new Date().toLocaleDateString('es-AR') + '</div><div class="metric-sub">desde Open Orange</div></div>' +
+    '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido - enviado</div></div>' +
+    '<div class="metric"><div class="metric-label">Total recibido de clientes</div><div class="metric-value">USD ' + fmt(totalRecibidoClientes) + '</div><div class="metric-sub">confirmado por intermediario</div></div>' +
+    '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '</div>' +
-    '<div class="card"><div class="card-header"><div class="card-title">Cuentas a cobrar por cliente</div></div>' +
-    lista.map(cl =>
-      '<div class="pago-row" style="cursor:pointer" onclick="toggleFacturas(\'' + cl.codigo + '\')">' +
-      '<div class="pago-avatar">' + cl.nombre.substring(0,2) + '</div>' +
-      '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div><div class="pago-sub">Codigo: ' + cl.codigo + ' &nbsp;|&nbsp; ' + cl.facturas.length + ' comprobante(s)</div></div>' +
-      '<div style="text-align:right;min-width:120px"><div class="pago-amount">USD ' + fmt(cl.saldo) + '</div><div style="font-size:11px;color:var(--red)">Vencido: USD ' + fmt(cl.vencido) + '</div></div>' +
-      (cl.vencido > 0 ? '<span class="badge badge-late">Vencido</span>' : '<span class="badge badge-released">Al dia</span>') +
-      '</div>' +
-      '<div id="facturas-' + cl.codigo + '" style="display:none;padding:0 18px 12px;background:var(--surface2)">' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
-      '<thead><tr style="color:var(--text3);text-align:left"><th style="padding:8px 4px">Tipo</th><th>Nro</th><th>Fecha</th><th>Vto.</th><th>Dias</th><th style="text-align:right">Saldo USD</th></tr></thead>' +
-      '<tbody>' +
-      cl.facturas.map(f =>
-        '<tr style="border-top:0.5px solid var(--border)">' +
-        '<td style="padding:6px 4px">' + f.tipo + '</td>' +
-        '<td>' + f.nro + '</td>' +
-        '<td>' + f.fecha + '</td>' +
-        '<td>' + f.vto + '</td>' +
-        '<td style="color:' + (f.diasVencidos > 0 ? 'var(--red)' : 'var(--green)') + '">' + f.diasVencidos + '</td>' +
-        '<td style="text-align:right;font-family:\'DM Mono\',monospace">' + fmt(f.saldo) + '</td>' +
-        '</tr>'
-      ).join('') +
-      '</tbody></table></div>'
-    ).join('') +
+
+    '<div class="grid-2 section-gap">' +
+
+    '<div class="card"><div class="card-header"><div class="card-title">Ultimos pagos de clientes</div></div>' +
+    (pagos.slice(0,5).length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
+      pagos.slice(0,5).map(p =>
+        '<div class="pago-row" style="padding:10px 18px">' +
+        '<div class="pago-info"><div class="pago-name">' + (p.nombre_cliente||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
+        '</div>'
+      ).join('')
+    ) + '</div>' +
+
+    '<div class="card"><div class="card-header"><div class="card-title">Ultimos envios del intermediario</div></div>' +
+    (envios.slice(0,5).length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
+      envios.slice(0,5).map(e =>
+        '<div class="pago-row" style="padding:10px 18px">' +
+        '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia ? ' - ' + e.referencia : '') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' - ' + (e.detalle_envio||[]).length + ' cliente(s)</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
+        '</div>'
+      ).join('')
+    ) + '</div>' +
+
     '</div>';
 }
 
-function toggleFacturas(codigo) {
-  const el = document.getElementById('facturas-' + codigo);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-// EMPRESA: PAGOS
-async function renderPagos() {
-  const { data: pagos } = await db.from('pagos').select('*, ordenes(numero), clientes(profiles(nombre))').order('created_at', { ascending: false });
-  const c = document.getElementById('main-content');
-  if (!pagos || !pagos.length) { c.innerHTML = '<div class="empty-state">No hay pagos registrados aun.</div>'; return; }
-  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los pagos</div></div>' +
-    pagos.map(p =>
-      '<div class="pago-row">' +
-      '<div class="pago-info"><div class="pago-name">' + (p.clientes?.profiles?.nombre||'-') + ' - Orden #' + (p.ordenes?.numero||'-') + '</div>' +
-      '<div class="pago-sub">' + p.fecha_pago + ' - ' + p.forma_pago + '</div></div>' +
-      '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-      '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
-      '</div>'
-    ).join('') + '</div>';
-}
-
-// EMPRESA: CUENTA PAGADOR
-async function renderPagadorCuenta() {
-  const [pagoRes, liqRes] = await Promise.all([
-    db.from('pagos').select('monto').eq('estado','confirmado'),
-    db.from('liquidaciones').select('*').order('created_at', { ascending: false }),
+// ── EMPRESA: CONTROL INTERMEDIARIO ──
+async function renderControlIntermediario() {
+  const [pagCliRes, enviosRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
   ]);
-  const totalConf = (pagoRes.data||[]).reduce((s,p) => s+Number(p.monto), 0);
-  const totalLiq = (liqRes.data||[]).reduce((s,l) => s+Number(l.monto), 0);
-  const saldo = totalConf - totalLiq;
-  const pct = totalConf > 0 ? Math.round((totalLiq/totalConf)*100) : 0;
-  const liq = liqRes.data || [];
+
+  const pagos = pagCliRes.data || [];
+  const envios = enviosRes.data || [];
+  const totalRecibido = pagos.filter(p=>p.estado==='confirmado').reduce((s,p) => s+Number(p.monto), 0);
+  const totalEnviado = envios.reduce((s,e) => s+Number(e.monto_total), 0);
+  const enPoder = totalRecibido - totalEnviado;
+  const pct = totalRecibido > 0 ? Math.round((totalEnviado/totalRecibido)*100) : 0;
+
   const c = document.getElementById('main-content');
   c.innerHTML =
-    '<div class="card section-gap"><div class="card-header"><div class="card-title">Saldo del pagador</div></div>' +
-    '<div class="progress-container"><div class="progress-header"><span class="progress-label">Liquidado del total confirmado</span><span class="progress-value">USD ' + fmt(totalLiq) + ' / USD ' + fmt(totalConf) + '</span></div>' +
-    '<div class="progress-bar"><div class="progress-fill ' + (saldo>0?'danger':'') + '" style="width:' + pct + '%"></div></div></div>' +
-    '<div class="data-row"><span class="data-label">Total confirmado</span><span class="data-value">USD ' + fmt(totalConf) + '</span></div>' +
-    '<div class="data-row"><span class="data-label">Total liquidado</span><span class="data-value">USD ' + fmt(totalLiq) + '</span></div>' +
-    '<div class="data-row"><span class="data-label">Saldo pendiente</span><span class="data-value ' + (saldo>0?'danger':'') + '">USD ' + fmt(saldo) + '</span></div></div>' +
-    '<div class="card"><div class="card-header"><div class="card-title">Historial de liquidaciones</div></div>' +
-    (liq.length===0 ? '<div class="empty-state">Sin liquidaciones aun.</div>' :
-      liq.map(l => '<div class="data-row"><span class="data-label">' + new Date(l.created_at).toLocaleDateString('es-AR') + ' - ' + l.medio + (l.notas?' - '+l.notas:'') + '</span><span class="data-value">USD ' + fmt(l.monto) + '</span></div>').join('')
-    ) + '</div>';
-}
+    '<div class="card section-gap"><div class="card-header"><div class="card-title">Posicion del intermediario</div><button class="btn btn-sm" onclick="exportarExcel()">Exportar Excel</button></div>' +
+    '<div class="progress-container"><div class="progress-header"><span class="progress-label">Enviado a empresa del total recibido de clientes</span><span class="progress-value">USD ' + fmt(totalEnviado) + ' / USD ' + fmt(totalRecibido) + '</span></div>' +
+    '<div class="progress-bar"><div class="progress-fill ' + (enPoder>0?'danger':'') + '" style="width:' + pct + '%"></div></div></div>' +
+    '<div class="data-row"><span class="data-label">Total recibido de clientes (confirmado)</span><span class="data-value">USD ' + fmt(totalRecibido) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">Total enviado a la empresa</span><span class="data-value">USD ' + fmt(totalEnviado) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">En poder del intermediario</span><span class="data-value ' + (enPoder>0?'danger':'ok') + '">USD ' + fmt(enPoder) + '</span></div>' +
+    '</div>' +
 
-// EMPRESA: USUARIOS
-async function renderUsuarios() {
-  const { data: profiles } = await db.from('profiles').select('*').order('created_at', { ascending: false });
-  const c = document.getElementById('main-content');
-  c.innerHTML =
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;">' +
-    '<button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Nuevo usuario</button></div>' +
-    '<div class="card"><div class="card-header"><div class="card-title">Usuarios del sistema</div></div>' +
-    (profiles||[]).map(p =>
-      '<div class="pago-row">' +
-      '<div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
-      '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">' + p.email + '</div></div>' +
-      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span>' +
-      '</div>'
-    ).join('') + '</div>';
-}
+    '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios a la empresa</div></div>' +
+    (envios.length === 0 ? '<div class="empty-state">Sin envios registrados.</div>' :
+      envios.map(e => {
+        const detalle = e.detalle_envio || [];
+        return '<div style="border-bottom:0.5px solid var(--border)">' +
+          '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'env-' + e.id + '\')">' +
+          '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia?' - '+e.referencia:'') + '</div>' +
+          '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' - ' + detalle.length + ' cliente(s) incluidos</div></div>' +
+          '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
+          '<span style="font-size:11px;color:var(--text3);cursor:pointer">ver detalle</span>' +
+          '</div>' +
+          '<div id="env-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+          '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+          '<thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
+          detalle.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:\'DM Mono\',monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
+          '</tbody></table></div>' +
+          '</div>';
+      }).join('')
+    ) + '</div>' +
 
-// PAGADOR
-async function renderPagadorHome() {
-  const { data: pagos } = await db.from('pagos').select('*, ordenes(numero), clientes(profiles(nombre))').eq('estado','pendiente').order('created_at', { ascending: false });
-  const lista = pagos || [];
-  const c = document.getElementById('main-content');
-  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Pagos a confirmar</div><span class="badge badge-pending">' + lista.length + ' pendientes</span></div>' +
-    (lista.length===0 ? '<div class="empty-state">No hay pagos pendientes de confirmacion.</div>' :
-      lista.map(p =>
+    '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
+    (pagos.length === 0 ? '<div class="empty-state">Sin pagos registrados.</div>' :
+      pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-avatar">' + (p.clientes?.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
-        '<div class="pago-info"><div class="pago-name">' + (p.clientes?.profiles?.nombre||'-') + ' - Orden #' + (p.ordenes?.numero||'-') + '</div>' +
-        '<div class="pago-sub">' + p.fecha_pago + ' - ' + p.forma_pago + ' - subido ' + new Date(p.created_at).toLocaleDateString('es-AR') + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<button class="btn btn-confirm btn-sm" onclick="abrirConfirmarPago(\'' + p.id + '\',\'' + (p.clientes?.profiles?.nombre||'') + '\',\'' + p.monto + '\',\'' + (p.ordenes?.numero||'') + '\')">Confirmar</button>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>';
 }
 
-async function renderPagadorLiquidar() {
-  const [pagoRes, liqRes] = await Promise.all([
-    db.from('pagos').select('monto').eq('estado','confirmado'),
-    db.from('liquidaciones').select('monto'),
+function toggleDetalle(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function exportarExcel() {
+  alert('Exportacion a Excel disponible proximamente.');
+}
+
+// ── EMPRESA: PAGOS CLIENTES ──
+async function renderPagosClientes() {
+  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false });
+  const c = document.getElementById('main-content');
+  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los pagos informados por clientes</div></div>' +
+    (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aun.</div>' :
+      pagos.map(p =>
+        '<div class="pago-row">' +
+        '<div class="pago-avatar">' + (p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
+        '</div>'
+      ).join('')
+    ) + '</div>';
+}
+
+// ── EMPRESA: SALDOS ERP ──
+async function renderSaldosERP() {
+  const c = document.getElementById('main-content');
+  c.innerHTML = '<div class="loading">Cargando datos del ERP...</div>';
+  const cuentas = await fetchCuentas();
+  const lista = Object.values(cuentas);
+  if (!lista.length) { c.innerHTML = '<div class="alert alert-danger"><span class="alert-icon">!</span><div>No se pudieron cargar los datos del ERP.</div></div>'; return; }
+  const totalSaldo = lista.reduce((s,cl) => s+cl.saldo, 0);
+  const totalVencido = lista.reduce((s,cl) => s+cl.vencido, 0);
+  c.innerHTML =
+    '<div class="metrics">' +
+    '<div class="metric"><div class="metric-label">Total saldo a cobrar</div><div class="metric-value danger">USD ' + fmt(totalSaldo) + '</div><div class="metric-sub">' + lista.length + ' clientes</div></div>' +
+    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value danger">USD ' + fmt(totalVencido) + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Actualizado</div><div class="metric-value" style="font-size:14px">' + new Date().toLocaleDateString('es-AR') + '</div><div class="metric-sub">desde Open Orange</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Detalle por cliente</div></div>' +
+    lista.map(cl =>
+      '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'cl-' + cl.codigo + '\')">' +
+      '<div class="pago-avatar">' + cl.nombre.substring(0,2) + '</div>' +
+      '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div><div class="pago-sub">' + cl.facturas.length + ' comprobante(s)</div></div>' +
+      '<div style="text-align:right;min-width:130px"><div class="pago-amount">USD ' + fmt(cl.saldo) + '</div><div style="font-size:11px;color:var(--red)">Vencido: USD ' + fmt(cl.vencido) + '</div></div>' +
+      (cl.vencido > 0 ? '<span class="badge badge-late">Vencido</span>' : '<span class="badge badge-released">Al dia</span>') +
+      '</div>' +
+      '<div id="cl-' + cl.codigo + '" style="display:none;padding:0 18px 12px;background:var(--surface2)">' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left"><th style="padding:8px 4px">Tipo</th><th>Nro</th><th>Vto.</th><th>Dias</th><th style="text-align:right">Saldo USD</th></tr></thead><tbody>' +
+      cl.facturas.map(f => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + f.tipo + '</td><td>' + f.nro + '</td><td>' + f.vto + '</td><td style="color:' + (f.diasVencidos>0?'var(--red)':'var(--green)') + '">' + f.diasVencidos + 'd</td><td style="text-align:right;font-family:\'DM Mono\',monospace">' + fmt(f.saldo) + '</td></tr>').join('') +
+      '</tbody></table></div>'
+    ).join('') + '</div>';
+}
+
+// ── EMPRESA: USUARIOS ──
+async function renderUsuarios() {
+  const { data: profiles } = await db.from('profiles').select('*').order('created_at', { ascending: false });
+  const c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;"><button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Nuevo usuario</button></div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Usuarios del sistema</div></div>' +
+    (profiles||[]).map(p =>
+      '<div class="pago-row"><div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
+      '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">' + p.email + '</div></div>' +
+      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span></div>'
+    ).join('') + '</div>';
+}
+
+// ── INTERMEDIARIO: HOME ──
+async function renderIntHome() {
+  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','pendiente').order('created_at', { ascending: false });
+  const lista = pagos || [];
+  const c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div class="card"><div class="card-header"><div class="card-title">Pagos a confirmar</div><span class="badge badge-pending">' + lista.length + ' pendientes</span></div>' +
+    (lista.length === 0 ? '<div class="empty-state">No hay pagos pendientes de confirmacion.</div>' :
+      lista.map(p =>
+        '<div class="pago-row">' +
+        '<div class="pago-avatar">' + (p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Ver comprobante</a>' : '') +
+        '<button class="btn btn-confirm btn-sm" onclick="confirmarPagoCliente(\'' + p.id + '\',\'' + (p.profiles?.nombre||'') + '\',\'' + p.monto + '\')">Confirmar</button>' +
+        '</div>'
+      ).join('')
+    ) + '</div>';
+}
+
+async function confirmarPagoCliente(id, nombre, monto) {
+  if (!confirm('Confirmar recepcion de USD ' + fmt(monto) + ' de ' + nombre + '?')) return;
+  await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
+  await renderIntHome();
+}
+
+// ── INTERMEDIARIO: ENVIAR ──
+async function renderIntEnviar() {
+  const [pagRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('monto').eq('estado','confirmado'),
+    db.from('envios_intermediario').select('monto_total'),
   ]);
-  const totalConf = (pagoRes.data||[]).reduce((s,p) => s+Number(p.monto), 0);
-  const totalLiq = (liqRes.data||[]).reduce((s,l) => s+Number(l.monto), 0);
-  const saldo = totalConf - totalLiq;
+  const totalConf = (pagRes.data||[]).reduce((s,p) => s+Number(p.monto), 0);
+  const totalEnv = (envRes.data||[]).reduce((s,e) => s+Number(e.monto_total), 0);
+  const saldo = totalConf - totalEnv;
+
   const c = document.getElementById('main-content');
   c.innerHTML =
     '<div class="metrics" style="grid-template-columns:repeat(2,1fr);">' +
@@ -643,68 +659,135 @@ async function renderPagadorLiquidar() {
     '<div class="metric"><div class="metric-label">Pendiente de enviar</div><div class="metric-value ' + (saldo>0?'danger':'ok') + '">USD ' + fmt(saldo) + '</div></div>' +
     '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Registrar envio a la empresa</div></div><div class="form-pad">' +
-    '<div class="form-group"><label class="form-label">Monto enviado</label><input class="form-input" type="number" id="liq-monto" placeholder="0.00"/></div>' +
-    '<div class="form-group"><label class="form-label">Medio de envio</label><select class="form-select" id="liq-medio"><option value="usdt">USDT</option><option value="transferencia">Transferencia bancaria</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></div>' +
-    '<div class="form-group"><label class="form-label">Notas (opcional)</label><input class="form-input" id="liq-notas" placeholder="Hash, referencia, etc."/></div>' +
-    '<button class="btn btn-primary" onclick="registrarLiquidacion()">Registrar envio</button>' +
+    '<div class="form-group"><label class="form-label">Monto total enviado</label><input class="form-input" type="number" id="env-monto" placeholder="0.00"/></div>' +
+    '<div class="form-group"><label class="form-label">Medio</label><select class="form-select" id="env-medio"><option value="usdt">USDT</option><option value="transferencia">Transferencia bancaria</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></div>' +
+    '<div class="form-group"><label class="form-label">Referencia / Hash (opcional)</label><input class="form-input" id="env-ref" placeholder="Hash de transaccion, numero de referencia..."/></div>' +
+    '<div style="margin:16px 0 8px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label class="form-label" style="margin:0">Composicion del pago (por cliente)</label><button class="btn btn-sm" onclick="agregarLineaCliente()">+ Agregar cliente</button></div>' +
+    '<div id="lineas-clientes"></div>' +
+    '<div id="env-total-check" style="font-size:12px;color:var(--text3);margin-top:8px;font-family:\'DM Mono\',monospace"></div></div>' +
+    '<div id="env-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
+    '<button class="btn btn-primary" onclick="registrarEnvio()">Registrar envio</button>' +
     '</div></div>';
+
+  agregarLineaCliente();
 }
 
-async function renderPagadorHistorial() {
-  const { data: liq } = await db.from('liquidaciones').select('*').order('created_at', { ascending: false });
+let lineaCount = 0;
+async function agregarLineaCliente() {
+  const { data: profiles } = await db.from('profiles').select('id, nombre').eq('rol','cliente');
+  lineaCount++;
+  const id = 'linea-' + lineaCount;
+  const div = document.createElement('div');
+  div.id = id;
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;margin-bottom:8px;align-items:center';
+  div.innerHTML =
+    '<select class="form-select" id="' + id + '-cli"><option value="">Seleccionar cliente</option>' + (profiles||[]).map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('') + '</select>' +
+    '<input class="form-input" type="number" id="' + id + '-monto" placeholder="USD" oninput="actualizarTotal()"/>' +
+    '<input class="form-input" id="' + id + '-nota" placeholder="Nota (opcional)"/>' +
+    '<button class="btn btn-sm" onclick="document.getElementById(\'' + id + '\').remove();actualizarTotal()" style="padding:7px 10px">x</button>';
+  document.getElementById('lineas-clientes').appendChild(div);
+}
+
+function actualizarTotal() {
+  let total = 0;
+  document.querySelectorAll('[id^="linea-"][id$="-monto"]').forEach(el => { total += parseFloat(el.value)||0; });
+  const envMonto = parseFloat(document.getElementById('env-monto')?.value)||0;
+  const diff = envMonto - total;
+  const el = document.getElementById('env-total-check');
+  if (el) el.textContent = 'Suma de clientes: USD ' + fmt(total) + (envMonto > 0 ? ' / Total envio: USD ' + fmt(envMonto) + (Math.abs(diff) < 0.01 ? ' - OK' : ' - Diferencia: USD ' + fmt(diff)) : '');
+}
+
+async function registrarEnvio() {
+  const monto = parseFloat(document.getElementById('env-monto').value);
+  const medio = document.getElementById('env-medio').value;
+  const ref = document.getElementById('env-ref').value;
+  if (!monto) { alert('Ingresa el monto total.'); return; }
+
+  const lineas = [];
+  document.querySelectorAll('[id^="linea-"][id$="-monto"]').forEach(el => {
+    const lineId = el.id.replace('-monto','');
+    const cliId = document.getElementById(lineId + '-cli')?.value;
+    const lineaMonto = parseFloat(el.value)||0;
+    const nota = document.getElementById(lineId + '-nota')?.value || '';
+    if (cliId && lineaMonto > 0) lineas.push({ cliente_profile_id: cliId, monto: lineaMonto, nota });
+  });
+
+  if (lineas.length === 0) { alert('Agrega al menos un cliente con monto.'); return; }
+
+  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref }).select().single();
+  if (error) { alert('Error al registrar.'); return; }
+
+  await db.from('detalle_envio').insert(lineas.map(l => ({ envio_id: envio.id, cliente_profile_id: l.cliente_profile_id, monto: l.monto, nota: l.nota })));
+
+  const msg = document.getElementById('env-msg');
+  msg.textContent = 'Envio registrado correctamente. La empresa lo vera reflejado.';
+  msg.style.display = 'flex';
+  setTimeout(() => loadView('int-historial'), 1500);
+}
+
+// ── INTERMEDIARIO: HISTORIAL ──
+async function renderIntHistorial() {
+  const [pagRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
+  ]);
+  const pagos = pagRes.data || [];
+  const envios = envRes.data || [];
   const c = document.getElementById('main-content');
-  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Historial de envios</div></div>' +
-    (!(liq||[]).length ? '<div class="empty-state">Sin envios registrados aun.</div>' :
-      (liq||[]).map(l => '<div class="data-row"><span class="data-label">' + new Date(l.created_at).toLocaleDateString('es-AR') + ' - ' + l.medio + (l.notas?' - '+l.notas:'') + '</span><span class="data-value">USD ' + fmt(l.monto) + '</span></div>').join('')
+  c.innerHTML =
+    '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios a la empresa</div></div>' +
+    (envios.length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
+      envios.map(e => {
+        const det = e.detalle_envio || [];
+        return '<div style="border-bottom:0.5px solid var(--border)">' +
+          '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'henv-' + e.id + '\')">' +
+          '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia?' - '+e.referencia:'') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + '</div></div>' +
+          '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div><span style="font-size:11px;color:var(--text3)">ver detalle</span></div>' +
+          '<div id="henv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+          det.map(d => '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border)"><span>' + (d.profiles?.nombre||'-') + (d.nota?' - '+d.nota:'') + '</span><span style="font-family:\'DM Mono\',monospace">USD ' + fmt(d.monto) + '</span></div>').join('') +
+          '</div></div>';
+      }).join('')
+    ) + '</div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
+    (pagos.length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
+      pagos.map(p =>
+        '<div class="pago-row">' +
+        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + p.estado + '</span>' +
+        '</div>'
+      ).join('')
     ) + '</div>';
 }
 
-// CLIENTE
-async function renderClienteHome() {
-  const { data: cliente } = await db.from('clientes').select('id').eq('profile_id', currentUser.id).single();
-  if (!cliente) { document.getElementById('main-content').innerHTML = '<div class="empty-state">No se encontro tu perfil de cliente. Contacta a la empresa.</div>'; return; }
-
+// ── CLIENTE: HOME ──
+async function renderCliHome() {
   const cuentas = await fetchCuentas();
-  const cuenta = getCuentaByNombre(cuentas, currentProfile.nombre);
+  const cuenta = Object.values(cuentas).find(cl => cl.nombre.toUpperCase().trim() === currentProfile.nombre.toUpperCase().trim());
+  const { data: pagos } = await db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false });
 
-  const { data: pagosPlat } = await db.from('pagos').select('*, ordenes(numero)').eq('cliente_id', cliente.id).order('created_at', { ascending: false });
   const c = document.getElementById('main-content');
-
   let html = '';
 
-  // Resumen saldo ERP
   if (cuenta) {
     html +=
       '<div class="metrics">' +
-      '<div class="metric"><div class="metric-label">Saldo total a pagar</div><div class="metric-value danger">USD ' + fmt(cuenta.saldo) + '</div><div class="metric-sub">segun Open Orange</div></div>' +
-      '<div class="metric"><div class="metric-label">Vencido</div><div class="metric-value ' + (cuenta.vencido>0?'danger':'ok') + '">USD ' + fmt(cuenta.vencido) + '</div><div class="metric-sub">' + (cuenta.vencido>0?'requiere pago urgente':'al dia') + '</div></div>' +
-      '<div class="metric"><div class="metric-label">Comprobantes</div><div class="metric-value">' + cuenta.facturas.length + '</div><div class="metric-sub">facturas / notas</div></div>' +
-      '</div>';
-
-    html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Mis facturas y notas</div></div>' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
-      '<thead><tr style="color:var(--text3);text-align:left;border-bottom:0.5px solid var(--border)"><th style="padding:10px 18px">Tipo</th><th>Nro</th><th>Fecha</th><th>Vto.</th><th>Dias</th><th style="text-align:right;padding-right:18px">Saldo USD</th></tr></thead><tbody>' +
-      cuenta.facturas.map(f =>
-        '<tr style="border-bottom:0.5px solid var(--border)">' +
-        '<td style="padding:10px 18px">' + f.tipo + '</td>' +
-        '<td>' + f.nro + '</td>' +
-        '<td>' + f.fecha + '</td>' +
-        '<td>' + f.vto + '</td>' +
-        '<td style="color:' + (f.diasVencidos>0?'var(--red)':'var(--green)') + ';font-weight:500">' + f.diasVencidos + 'd</td>' +
-        '<td style="text-align:right;padding-right:18px;font-family:\'DM Mono\',monospace;font-weight:500">' + fmt(f.saldo) + '</td>' +
-        '</tr>'
-      ).join('') +
+      '<div class="metric"><div class="metric-label">Saldo en ERP</div><div class="metric-value danger">USD ' + fmt(cuenta.saldo) + '</div><div class="metric-sub">segun Open Orange</div></div>' +
+      '<div class="metric"><div class="metric-label">Vencido</div><div class="metric-value ' + (cuenta.vencido>0?'danger':'ok') + '">USD ' + fmt(cuenta.vencido) + '</div><div class="metric-sub">' + (cuenta.vencido>0?'pago urgente':'al dia') + '</div></div>' +
+      '<div class="metric"><div class="metric-label">Facturas</div><div class="metric-value">' + cuenta.facturas.length + '</div><div class="metric-sub">comprobantes pendientes</div></div>' +
+      '</div>' +
+      '<div class="card section-gap"><div class="card-header"><div class="card-title">Mis facturas</div></div>' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left;border-bottom:0.5px solid var(--border)"><th style="padding:10px 18px">Tipo</th><th>Nro</th><th>Vto.</th><th>Dias</th><th style="text-align:right;padding-right:18px">Saldo USD</th></tr></thead><tbody>' +
+      cuenta.facturas.map(f => '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:10px 18px">' + f.tipo + '</td><td>' + f.nro + '</td><td>' + f.vto + '</td><td style="color:' + (f.diasVencidos>0?'var(--red)':'var(--green)') + ';font-weight:500">' + f.diasVencidos + 'd</td><td style="text-align:right;padding-right:18px;font-family:\'DM Mono\',monospace;font-weight:500">' + fmt(f.saldo) + '</td></tr>').join('') +
       '</tbody></table></div>';
-  } else {
-    html += '<div class="alert alert-info"><span class="alert-icon">i</span><div>No se encontraron datos de saldo en el ERP para tu cuenta. Contacta a la empresa.</div></div>';
   }
 
-  // Pagos reportados en la plataforma
-  html += '<div class="card"><div class="card-header"><div class="card-title">Mis pagos reportados</div><button class="btn btn-primary btn-sm" onclick="loadView(\'cliente-pagar\')">+ Reportar pago</button></div>' +
-    (!(pagosPlat||[]).length ? '<div class="empty-state">No has reportado pagos aun.</div>' :
-      (pagosPlat||[]).map(p =>
+  html +=
+    '<div class="card"><div class="card-header"><div class="card-title">Mis pagos informados</div><button class="btn btn-primary btn-sm" onclick="loadView(\'cli-pagar\')">+ Informar pago</button></div>' +
+    (!(pagos||[]).length ? '<div class="empty-state">No has informado pagos aun.</div>' :
+      pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">Orden #' + (p.ordenes?.numero||'-') + '</div><div class="pago-sub">' + p.fecha_pago + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">Pago del ' + new Date(p.created_at).toLocaleDateString('es-AR') + '</div><div class="pago-sub">' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + ' - registrado ' + new Date(p.created_at).toLocaleTimeString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Esperando confirmacion') + '</span>' +
         '</div>'
@@ -714,80 +797,46 @@ async function renderClienteHome() {
   c.innerHTML = html;
 }
 
-async function renderClientePagar() {
-  const { data: cliente } = await db.from('clientes').select('id').eq('profile_id', currentUser.id).single();
-  if (!cliente) { document.getElementById('main-content').innerHTML = '<div class="empty-state">No se encontro tu perfil.</div>'; return; }
-  const { data: ordenes } = await db.from('ordenes').select('*').eq('cliente_id', cliente.id).in('estado',['pendiente']);
+// ── CLIENTE: INFORMAR PAGO ──
+async function renderCliPagar() {
   const c = document.getElementById('main-content');
   c.innerHTML =
-    '<div class="card"><div class="card-header"><div class="card-title">Reportar un pago</div></div><div class="form-pad">' +
-    '<div class="form-group"><label class="form-label">Orden relacionada</label><select class="form-select" id="cp-orden">' +
-    (!(ordenes||[]).length ? '<option>Sin ordenes pendientes</option>' : (ordenes||[]).map(o => '<option value="' + o.id + '">Orden #' + o.numero + ' - USD ' + fmt(o.monto) + '</option>').join('')) +
-    '</select></div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Informar un pago al intermediario</div></div><div class="form-pad">' +
     '<div class="grid-2">' +
-    '<div class="form-group"><label class="form-label">Monto pagado</label><input class="form-input" type="number" id="cp-monto" placeholder="0.00"/></div>' +
+    '<div class="form-group"><label class="form-label">Monto pagado (USD)</label><input class="form-input" type="number" id="cp-monto" placeholder="0.00"/></div>' +
     '<div class="form-group"><label class="form-label">Fecha del pago</label><input class="form-input" type="date" id="cp-fecha"/></div>' +
     '</div>' +
     '<div class="form-group"><label class="form-label">Forma de pago</label><select class="form-select" id="cp-forma"><option value="efectivo">Efectivo</option><option value="usdt">USDT</option><option value="cheque">Cheque</option><option value="transferencia">Transferencia</option><option value="otro">Otro</option></select></div>' +
-    '<div id="cp-msg" style="display:none;" class="alert alert-info"></div>' +
-    '<button class="btn btn-primary" onclick="clienteReportarPago(\'' + cliente.id + '\')">Enviar reporte</button>' +
+    '<div class="form-group"><label class="form-label">Referencia (opcional)</label><input class="form-input" id="cp-ref" placeholder="Numero de transaccion, hash, etc."/></div>' +
+    '<div class="upload-zone" onclick="document.getElementById(\'cp-file\').click()"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF, captura - max 5MB</div><input type="file" id="cp-file" style="display:none" accept="image/*,.pdf"/></div>' +
+    '<div id="cp-file-name" style="font-size:12px;color:var(--text3);margin:-8px 0 12px"></div>' +
+    '<div id="cp-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
+    '<button class="btn btn-primary" onclick="informarPago()">Enviar informe de pago</button>' +
     '</div></div>';
+
+  document.getElementById('cp-file').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) document.getElementById('cp-file-name').textContent = 'Archivo: ' + f.name;
+  });
 }
 
-// ACCIONES
-async function clienteReportarPago(clienteId) {
-  const ordenId = document.getElementById('cp-orden').value;
-  const monto = document.getElementById('cp-monto').value;
+async function informarPago() {
+  const monto = parseFloat(document.getElementById('cp-monto').value);
   const fecha = document.getElementById('cp-fecha').value;
   const forma = document.getElementById('cp-forma').value;
-  if (!ordenId || !monto || !fecha) { alert('Completa todos los campos.'); return; }
-  const { error } = await db.from('pagos').insert({ orden_id: ordenId, cliente_id: clienteId, monto: Number(monto), fecha_pago: fecha, forma_pago: forma });
-  if (error) { alert('Error al registrar el pago.'); return; }
-  await db.from('ordenes').update({ estado: 'pago_reportado' }).eq('id', ordenId);
+  const ref = document.getElementById('cp-ref').value;
+  if (!monto || !fecha) { alert('Completa monto y fecha.'); return; }
+
+  const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, estado: 'pendiente' });
+  if (error) { alert('Error al registrar: ' + error.message); return; }
+
   const msg = document.getElementById('cp-msg');
-  msg.textContent = 'Pago reportado correctamente. El pagador lo confirmara a la brevedad.';
+  msg.textContent = 'Pago informado correctamente. El intermediario lo confirmara a la brevedad.';
   msg.style.display = 'flex';
+  setTimeout(() => loadView('cli-home'), 2000);
 }
 
-function abrirConfirmarPago(pagoId, nombre, monto, numero) {
-  activePagoId = pagoId;
-  document.getElementById('confirmar-detalle').innerHTML = '<strong>Cliente:</strong> ' + nombre + '<br><strong>Orden:</strong> #' + numero + '<br><strong>Monto:</strong> USD ' + fmt(monto);
-  abrirModal('modal-confirmar-pago');
-}
-
-async function confirmarPago() {
-  if (!activePagoId) return;
-  const { data: pago } = await db.from('pagos').select('orden_id').eq('id', activePagoId).single();
-  await db.from('pagos').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', activePagoId);
-  await db.from('ordenes').update({ estado: 'pago_confirmado' }).eq('id', pago.orden_id);
-  cerrarModal('modal-confirmar-pago');
-  await renderPagadorHome();
-}
-
-function abrirLiberarOrden(ordenId, numero, monto) {
-  activeOrderId = ordenId;
-  document.getElementById('liberar-detalle').innerHTML = '<strong>Orden:</strong> #' + numero + '<br><strong>Monto:</strong> USD ' + fmt(monto);
-  abrirModal('modal-liberar-orden');
-}
-
-async function liberarOrden() {
-  if (!activeOrderId) return;
-  await db.from('ordenes').update({ estado: 'liberada' }).eq('id', activeOrderId);
-  cerrarModal('modal-liberar-orden');
-  await renderDashboard();
-}
-
-async function registrarLiquidacion() {
-  const monto = document.getElementById('liq-monto').value;
-  const medio = document.getElementById('liq-medio').value;
-  const notas = document.getElementById('liq-notas').value;
-  if (!monto) { alert('Ingresa el monto.'); return; }
-  const { error } = await db.from('liquidaciones').insert({ monto: Number(monto), medio, notas });
-  if (error) { alert('Error al registrar.'); return; }
-  alert('Liquidacion registrada correctamente.');
-  await renderPagadorLiquidar();
-}
-
+// USUARIOS
 async function crearUsuario() {
   const nombre = document.getElementById('nu-nombre').value.trim();
   const email = document.getElementById('nu-email').value.trim();
@@ -798,12 +847,8 @@ async function crearUsuario() {
   if (!nombre || !email || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
   const { data, error } = await db.auth.signUp({ email, password: pass, options: { data: { nombre, rol } } });
   if (error) { showErr(errEl, error.message); return; }
-  if (rol === 'cliente' && data.user) {
-    const codigo = 'CLI-' + Math.random().toString(36).substring(2,6).toUpperCase();
-    await db.from('clientes').insert({ profile_id: data.user.id, codigo });
-  }
   cerrarModal('modal-crear-usuario');
-  alert('Usuario "' + nombre + '" creado. Puede ingresar con ' + email + ' y la contrasena que definiste.');
+  alert('Usuario "' + nombre + '" creado. Ya puede ingresar con ' + email);
   await renderUsuarios();
 }
 
