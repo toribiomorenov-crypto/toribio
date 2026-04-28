@@ -692,30 +692,59 @@ async function renderClientes() {
   const clientesConAcceso = new Set(profiles.map(p => p.nombre.toUpperCase().trim()));
 
   const c = document.getElementById('main-content');
-  c.innerHTML =
-    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">' +
-    '<button class="btn" onclick="document.getElementById(\'import-file\').click()">Importar desde Excel</button>' +
-    '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls" onchange="importarClientes(this)"/>' +
-    '<button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Crear usuario</button>' +
-    '</div>' +
-    (clientes.length === 0 ?
-      '<div class="card"><div class="empty-state" style="padding:40px"><div style="font-size:24px;margin-bottom:12px">📋</div><div style="font-weight:500;margin-bottom:6px">Sin clientes importados</div><div style="font-size:12px;color:var(--text3)">Importa el listado desde Open Orange para empezar</div></div></div>' :
-      '<div class="card"><div class="card-header"><div class="card-title">Clientes (' + clientes.length + ')</div></div>' +
-      clientes.map(cl => {
-        const tieneAcceso = clientesConAcceso.has(cl.nombre.toUpperCase().trim());
-        const perfil = profiles.find(p => p.nombre.toUpperCase().trim() === cl.nombre.toUpperCase().trim());
-        return '<div class="pago-row">' +
-          '<div class="pago-avatar">' + cl.nombre.substring(0,2).toUpperCase() + '</div>' +
-          '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div>' +
-          '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' · ' + perfil.email : '') + '</div></div>' +
-          (tieneAcceso ? '<span class="badge badge-released">Con acceso</span>' : '<span class="badge badge-pending">Sin acceso</span>') +
-          (!tieneAcceso
-            ? '<button class="btn btn-primary btn-sm" onclick="abrirCrearAcceso('' + cl.nombre.replace(/'/g,"\'") + '')">Dar acceso</button>'
-            : '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" onclick="revocarAcceso('' + (perfil?.id||'') + '','' + cl.nombre.replace(/'/g,"\'") + '')">Revocar</button>'
-          ) +
-          '</div>';
-      }).join('') + '</div>'
-    );
+
+  let html = '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">';
+  html += '<button class="btn" id="btn-import-excel">Importar desde Excel</button>';
+  html += '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls"/>';
+  html += '<button class="btn btn-primary" id="btn-nuevo-usuario">+ Crear usuario</button>';
+  html += '</div>';
+
+  if (clientes.length === 0) {
+    html += '<div class="card"><div class="empty-state" style="padding:40px">';
+    html += '<div style="font-size:24px;margin-bottom:12px">📋</div>';
+    html += '<div style="font-weight:500;margin-bottom:6px">Sin clientes importados</div>';
+    html += '<div style="font-size:12px;color:var(--text3)">Importa el listado desde Open Orange para empezar</div>';
+    html += '</div></div>';
+  } else {
+    html += '<div class="card"><div class="card-header"><div class="card-title">Clientes (' + clientes.length + ')</div></div>';
+    clientes.forEach(function(cl) {
+      const tieneAcceso = clientesConAcceso.has(cl.nombre.toUpperCase().trim());
+      const perfil = profiles.find(function(p) { return p.nombre.toUpperCase().trim() === cl.nombre.toUpperCase().trim(); });
+      const nombreSafe = cl.nombre.replace(/\\/g, '').replace(/'/g, '');
+      const perfilId = perfil ? perfil.id : '';
+
+      html += '<div class="pago-row">';
+      html += '<div class="pago-avatar">' + cl.nombre.substring(0,2).toUpperCase() + '</div>';
+      html += '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div>';
+      html += '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' &middot; ' + perfil.email : '') + '</div></div>';
+      if (tieneAcceso) {
+        html += '<span class="badge badge-released">Con acceso</span>';
+        html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + perfilId + '" data-nombre="' + nombreSafe + '" class2="revocar-acceso">Revocar</button>';
+      } else {
+        html += '<span class="badge badge-pending">Sin acceso</span>';
+        html += '<button class="btn btn-primary btn-sm" data-nombre="' + nombreSafe + '" class2="dar-acceso">Dar acceso</button>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  }
+
+  c.innerHTML = html;
+
+  // Attach events after DOM is ready
+  const btnImport = document.getElementById('btn-import-excel');
+  if (btnImport) btnImport.onclick = function() { document.getElementById('import-file').click(); };
+  const btnNuevo = document.getElementById('btn-nuevo-usuario');
+  if (btnNuevo) btnNuevo.onclick = function() { abrirModal('modal-crear-usuario'); };
+  const importFile = document.getElementById('import-file');
+  if (importFile) importFile.onchange = function() { importarClientes(this); };
+
+  document.querySelectorAll('[class2="dar-acceso"]').forEach(function(btn) {
+    btn.onclick = function() { abrirCrearAcceso(this.getAttribute('data-nombre')); };
+  });
+  document.querySelectorAll('[class2="revocar-acceso"]').forEach(function(btn) {
+    btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
+  });
 }
 
 async function importarClientes(input) {
