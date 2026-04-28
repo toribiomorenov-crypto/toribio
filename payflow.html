@@ -327,7 +327,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 <script>
 const SUPA_URL = 'https://lgrbdzutcoejdyymquku.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncmJkenV0Y29lamR5eW1xdWt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MDY5MDIsImV4cCI6MjA5MjI4MjkwMn0.6Vn9OuG8naHLhklt461ee3YzKuIpYji62lW_waY2QXI';
-const SHEETS_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQJxID47qmevAX4ETyjtQXQwLpxCHkWOybyHi7lZmYlHyiAa60eqGImsGEcLbcbMCTUoUyQofnw4d5n/pub?gid=510918856&single=true&output=csv';
 const { createClient } = supabase;
 const db = createClient(SUPA_URL, SUPA_KEY);
 
@@ -337,38 +336,6 @@ let cuentasCache = null;
 let activeModalData = {};
 
 // SHEETS
-async function fetchCuentas() {
-  if (cuentasCache) return cuentasCache;
-  try {
-    const res = await fetch(SHEETS_CSV);
-    const text = await res.text();
-    cuentasCache = parseCuentas(text);
-    return cuentasCache;
-  } catch(e) { return {}; }
-}
-
-function parseCuentas(csv) {
-  const lines = csv.split('\n').map(l => l.trim()).filter(l => l);
-  const clientes = {};
-  let current = null;
-  const skip = ['Tipo','Saldo','Vencido','Total','Cliente','Nombre','Total por moneda',''];
-  for (const line of lines) {
-    const cols = line.split(',').map(c => c.replace(/^"|"$/g,'').trim());
-    const cod = cols[0];
-    if (/^\d{3,}$/.test(cod) && cols[1] && cols[1] === cols[1].toUpperCase() && cols[1].length > 2 && !skip.includes(cols[1])) {
-      current = { codigo: cod, nombre: cols[1], vencido: parseFloat(cols[2])||0, saldo: parseFloat(cols[3])||0, facturas: [] };
-      clientes[cod] = current;
-    } else if (current && ['Factura','Nota de Débito','Nota de Crédito'].includes(cols[0])) {
-      current.facturas.push({ tipo: cols[0], nro: cols[1], fecha: excelDate(parseInt(cols[2])), vto: excelDate(parseInt(cols[3])), diasVencidos: parseInt(cols[4])||0, total: parseFloat(cols[5])||0, saldo: parseFloat(cols[6])||0 });
-    }
-  }
-  return clientes;
-}
-
-function excelDate(serial) {
-  if (!serial || isNaN(serial)) return '-';
-  return new Date((serial - 25569) * 86400000).toLocaleDateString('es-AR');
-}
 
 // AUTH
 async function doLogin() {
@@ -458,7 +425,6 @@ async function loadView(id) {
     'dashboard': ['Dashboard', 'Vision general del negocio'],
     'control-intermediario': ['Control del intermediario', 'Seguimiento de fondos en poder del intermediario'],
     'pagos-clientes': ['Pagos de clientes', 'Historial de pagos informados por clientes'],
-    'saldos-erp': ['Saldos ERP', 'Cuentas a cobrar desde Open Orange'],
     'clientes': ['Clientes', 'Alta y gestion de clientes'],
     'usuarios': ['Usuarios', 'Gestion de accesos'],
     'int-home': ['Pagos recibidos', 'Registra cobros de clientes'],
@@ -472,7 +438,7 @@ async function loadView(id) {
   document.getElementById('page-title').textContent = title;
   document.getElementById('page-subtitle').textContent = sub;
 
-  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'saldos-erp': renderSaldosERP, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
   if (views[id]) await views[id]();
 }
 
@@ -713,36 +679,6 @@ async function renderPagosClientes() {
     ) + '</div>';
 }
 
-// ── EMPRESA: SALDOS ERP ──
-async function renderSaldosERP() {
-  const c = document.getElementById('main-content');
-  c.innerHTML = '<div class="loading">Cargando datos del ERP...</div>';
-  const cuentas = await fetchCuentas();
-  const lista = Object.values(cuentas);
-  if (!lista.length) { c.innerHTML = '<div class="alert alert-danger"><span class="alert-icon">!</span><div>No se pudieron cargar los datos del ERP.</div></div>'; return; }
-  const totalSaldo = lista.reduce((s,cl) => s+cl.saldo, 0);
-  const totalVencido = lista.reduce((s,cl) => s+cl.vencido, 0);
-  c.innerHTML =
-    '<div class="metrics">' +
-    '<div class="metric"><div class="metric-label">Total saldo a cobrar</div><div class="metric-value danger">USD ' + fmt(totalSaldo) + '</div><div class="metric-sub">' + lista.length + ' clientes</div></div>' +
-    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value danger">USD ' + fmt(totalVencido) + '</div></div>' +
-    '<div class="metric"><div class="metric-label">Actualizado</div><div class="metric-value" style="font-size:14px">' + new Date().toLocaleDateString('es-AR') + '</div><div class="metric-sub">desde Open Orange</div></div>' +
-    '</div>' +
-    '<div class="card"><div class="card-header"><div class="card-title">Detalle por cliente</div></div>' +
-    lista.map(cl =>
-      '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'cl-' + cl.codigo + '\')">' +
-      '<div class="pago-avatar">' + cl.nombre.substring(0,2) + '</div>' +
-      '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div><div class="pago-sub">' + cl.facturas.length + ' comprobante(s)</div></div>' +
-      '<div style="text-align:right;min-width:130px"><div class="pago-amount">USD ' + fmt(cl.saldo) + '</div><div style="font-size:11px;color:var(--red)">Vencido: USD ' + fmt(cl.vencido) + '</div></div>' +
-      (cl.vencido > 0 ? '<span class="badge badge-late">Vencido</span>' : '<span class="badge badge-released">Al dia</span>') +
-      '</div>' +
-      '<div id="cl-' + cl.codigo + '" style="display:none;padding:0 18px 12px;background:var(--surface2)">' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left"><th style="padding:8px 4px">Tipo</th><th>Nro</th><th>Vto.</th><th>Dias</th><th style="text-align:right">Saldo USD</th></tr></thead><tbody>' +
-      cl.facturas.map(f => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + f.tipo + '</td><td>' + f.nro + '</td><td>' + f.vto + '</td><td style="color:' + (f.diasVencidos>0?'var(--red)':'var(--green)') + '">' + f.diasVencidos + 'd</td><td style="text-align:right;font-family:\'DM Mono\',monospace">' + fmt(f.saldo) + '</td></tr>').join('') +
-      '</tbody></table></div>'
-    ).join('') + '</div>';
-}
-
 // ── EMPRESA: USUARIOS ──
 async function renderUsuarios() {
   const { data: profiles } = await db.from('profiles').select('*').order('created_at', { ascending: false });
@@ -913,8 +849,7 @@ async function renderIntHistorial() {
 
 // ── CLIENTE: HOME ──
 async function renderCliHome() {
-  const cuentas = await fetchCuentas();
-  const cuenta = Object.values(cuentas).find(cl => cl.nombre.toUpperCase().trim() === currentProfile.nombre.toUpperCase().trim());
+  const cuenta = null;
   const { data: pagos } = await db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false });
 
   const c = document.getElementById('main-content');
@@ -946,6 +881,69 @@ async function renderCliHome() {
     ) + '</div>';
 
   c.innerHTML = html;
+}
+
+// ── INTERMEDIARIO: COMISION ──
+async function renderIntComision() {
+  const now = new Date();
+  const primerDia = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const ultimoDia = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59).toISOString();
+  const mesLabel = now.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+
+  const [pagRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+  ]);
+
+  const pagos = pagRes.data || [];
+  const envios = envRes.data || [];
+
+  let totalCalifica = 0;
+  let detalleComision = [];
+
+  pagos.forEach(p => {
+    const fechaPago = new Date(p.created_at);
+    const enviosCandidatos = envios
+      .filter(e => new Date(e.created_at) >= fechaPago)
+      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id));
+
+    if (enviosCandidatos.length === 0) {
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', monto: p.monto, horas: null, califica: false, comision: 0 });
+      return;
+    }
+
+    enviosCandidatos.forEach(e => {
+      const horas = (new Date(e.created_at) - fechaPago) / 3600000;
+      const det = (e.detalle_envio||[]).find(d => d.cliente_profile_id === p.cliente_profile_id);
+      const montoEnvio = det ? Number(det.monto) : 0;
+      const montoCalifica = horas <= 24 ? Math.min(montoEnvio, Number(p.monto)) : 0;
+      if (montoCalifica > 0) totalCalifica += montoCalifica;
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', monto: montoEnvio, horas: parseFloat(horas.toFixed(1)), califica: horas <= 24, comision: montoCalifica * 0.0001 });
+    });
+  });
+
+  const comisionTotal = totalCalifica * 0.0001;
+  const c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + comisionTotal.toFixed(4) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">enviado en menos de 24hs</div></div>' +
+    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto calificado</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div></div>' +
+    (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
+      detalleComision.map(d =>
+        '<div class="pago-row">' +
+        '<div class="pago-info"><div class="pago-name">' + d.cliente + '</div>' +
+        '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : d.horas + 'hs hasta el envio') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
+        (d.califica
+          ? '<span class="badge badge-released">Califica · USD ' + d.comision.toFixed(4) + '</span>'
+          : '<span class="badge badge-late">' + (d.horas === null ? 'Pendiente' : 'No califica') + '</span>'
+        ) +
+        '</div>'
+      ).join('')
+    ) + '</div>';
 }
 
 // ── CLIENTE: INFORMAR PAGO ──
