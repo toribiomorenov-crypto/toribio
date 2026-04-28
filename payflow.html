@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>PayFlow</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -142,12 +143,28 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;}
 .success-msg{background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);font-size:12px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:16px;display:none;}
 
+/* MOBILE NAV BAR */
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:50;padding:8px 0 env(safe-area-inset-bottom);}
+.mobile-nav-items{display:flex;justify-content:space-around;}
+.mobile-nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 12px;cursor:pointer;color:var(--text3);font-size:10px;font-weight:500;border-radius:var(--radius-sm);transition:color .12s;}
+.mobile-nav-item.active{color:var(--text);}
+.mobile-nav-icon{font-size:18px;line-height:1;}
+.mobile-topbar{display:none;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
+.mobile-topbar-title{font-size:15px;font-weight:500;}
+.mobile-logout{font-size:12px;color:var(--text3);cursor:pointer;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);}
+
 @media(max-width:768px){
   .sidebar{display:none;}
+  .topbar{display:none;}
+  .mobile-topbar{display:flex;}
+  .mobile-nav{display:block;}
   .metrics{grid-template-columns:1fr 1fr;}
   .grid-2{grid-template-columns:1fr;}
-  .content{padding:20px 16px;}
-  .topbar{padding:14px 16px;}
+  .content{padding:16px;padding-bottom:80px;}
+  .pago-row{flex-wrap:wrap;gap:8px;}
+  .pago-amount{font-size:13px;}
+  .modal{margin:12px;}
+  .form-pad{padding:14px;}
 }
 </style>
 </head>
@@ -174,6 +191,21 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <!-- ===== APP ===== -->
 <div id="app-screen">
+
+  <!-- MOBILE TOPBAR -->
+  <div class="mobile-topbar">
+    <div>
+      <div class="mobile-topbar-title" id="mobile-page-title">PayFlow</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;color:var(--text3)" id="mobile-user-nombre"></span>
+      <span class="mobile-logout" onclick="doLogout()">Salir</span>
+    </div>
+  </div>
+
+  <!-- MOBILE BOTTOM NAV (se llena dinámicamente) -->
+  <div class="mobile-nav"><div class="mobile-nav-items" id="mobile-nav-items"></div></div>
+
   <div class="shell">
     <div class="sidebar">
       <div class="logo">
@@ -387,12 +419,14 @@ function buildSidebar(rol) {
       { id:'control-intermediario', label:'Control intermediario' },
       { id:'pagos-clientes', label:'Pagos de clientes' },
       { id:'saldos-erp', label:'Saldos ERP' },
+      { id:'clientes', label:'Clientes' },
       { id:'usuarios', label:'Usuarios' },
     ],
     pagador: [
       { id:'int-home', label:'Pagos recibidos' },
       { id:'int-enviar', label:'Enviar a empresa' },
       { id:'int-historial', label:'Mi historial' },
+      { id:'int-comision', label:'Mi comision' },
     ],
     cliente: [
       { id:'cli-home', label:'Mi cuenta' },
@@ -406,8 +440,14 @@ function buildSidebar(rol) {
 
 function setActiveNav(id) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.mobile-nav-item').forEach(n => n.classList.remove('active'));
   const el = document.getElementById('nav-' + id);
   if (el) el.classList.add('active');
+  const mel = document.getElementById('mnav-' + id);
+  if (mel) mel.classList.add('active');
+  // Update mobile title
+  const mTitle = document.getElementById('mobile-page-title');
+  if (mTitle) mTitle.textContent = document.getElementById('page-title')?.textContent || 'PayFlow';
 }
 
 // ROUTER
@@ -419,10 +459,12 @@ async function loadView(id) {
     'control-intermediario': ['Control del intermediario', 'Seguimiento de fondos en poder del intermediario'],
     'pagos-clientes': ['Pagos de clientes', 'Historial de pagos informados por clientes'],
     'saldos-erp': ['Saldos ERP', 'Cuentas a cobrar desde Open Orange'],
+    'clientes': ['Clientes', 'Alta y gestion de clientes'],
     'usuarios': ['Usuarios', 'Gestion de accesos'],
     'int-home': ['Pagos recibidos', 'Registra cobros de clientes'],
     'int-enviar': ['Enviar a empresa', 'Informa transferencias a la empresa'],
     'int-historial': ['Mi historial', 'Todos tus movimientos'],
+    'int-comision': ['Mi comision', 'Calculo de comision por periodo'],
     'cli-home': ['Mi cuenta', 'Tu saldo y estado de pagos'],
     'cli-pagar': ['Informar pago', 'Notifica un pago al intermediario'],
   };
@@ -430,7 +472,7 @@ async function loadView(id) {
   document.getElementById('page-title').textContent = title;
   document.getElementById('page-subtitle').textContent = sub;
 
-  const views = { 'dashboard': renderDashboard, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'saldos-erp': renderSaldosERP, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'saldos-erp': renderSaldosERP, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
   if (views[id]) await views[id]();
 }
 
@@ -567,74 +609,93 @@ async function exportarExcel() {
     db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: true }),
   ]);
-
   const pagos = pagRes.data || [];
   const envios = envRes.data || [];
 
-  // Construir cuenta corriente intermediario-empresa
-  // Debitos: pagos recibidos de clientes (confirmados) = lo que el intermediario tiene que enviarnos
-  // Creditos: envios a la empresa = lo que ya nos envio
   let movimientos = [];
-
   pagos.filter(p => p.estado === 'confirmado').forEach(p => {
-    movimientos.push({
-      fecha: new Date(p.created_at),
-      tipo: 'COBRO DE CLIENTE',
-      detalle: (p.profiles?.nombre||'-') + (p.referencia ? ' - ' + p.referencia : ''),
-      debe: Number(p.monto),
-      haber: 0,
-    });
+    movimientos.push({ fecha: new Date(p.created_at), tipo: 'Cobro de cliente', cliente: p.profiles?.nombre||'-', referencia: p.referencia||'', debe: Number(p.monto), haber: 0 });
   });
-
   envios.forEach(e => {
-    const det = (e.detalle_envio||[]).map(d => (d.profiles?.nombre||'-') + ': USD ' + d.monto).join(' | ');
-    movimientos.push({
-      fecha: new Date(e.created_at),
-      tipo: 'ENVIO A EMPRESA',
-      detalle: e.medio + (e.referencia ? ' - ' + e.referencia : '') + (det ? ' | ' + det : ''),
-      debe: 0,
-      haber: Number(e.monto_total),
-    });
+    const det = (e.detalle_envio||[]).map(d => (d.profiles?.nombre||'-') + ' USD ' + d.monto).join(' | ');
+    movimientos.push({ fecha: new Date(e.created_at), tipo: 'Envio a empresa', cliente: det, referencia: e.referencia||'', debe: 0, haber: Number(e.monto_total) });
   });
-
   movimientos.sort((a,b) => a.fecha - b.fecha);
 
   let saldo = 0;
-  let csv = 'CUENTA CORRIENTE - INTERMEDIARIO vs EMPRESA\n';
-  csv += 'Generado: ' + new Date().toLocaleString('es-AR') + '\n\n';
-  csv += 'Fecha,Hora,Tipo,Detalle,Debe USD,Haber USD,Saldo USD\n';
+  const rows = [['CUENTA CORRIENTE — INTERMEDIARIO VS EMPRESA'], ['Generado: ' + new Date().toLocaleString('es-AR')], []];
+  rows.push(['Fecha', 'Hora', 'Tipo', 'Cliente / Detalle', 'Referencia', 'Debe USD', 'Haber USD', 'Saldo USD']);
 
   movimientos.forEach(m => {
     saldo += m.debe - m.haber;
-    csv += [
+    rows.push([
       m.fecha.toLocaleDateString('es-AR'),
       m.fecha.toLocaleTimeString('es-AR'),
-      m.tipo,
-      m.detalle,
-      m.debe > 0 ? m.debe.toFixed(2) : '',
-      m.haber > 0 ? m.haber.toFixed(2) : '',
-      saldo.toFixed(2)
-    ].map(v => '"' + String(v).replace(/"/g,'""') + '"').join(',') + '\n';
+      m.tipo, m.cliente, m.referencia,
+      m.debe > 0 ? m.debe : '',
+      m.haber > 0 ? m.haber : '',
+      parseFloat(saldo.toFixed(2))
+    ]);
   });
 
-  csv += '\n';
-  const totalDebe = movimientos.reduce((s,m) => s + m.debe, 0);
-  const totalHaber = movimientos.reduce((s,m) => s + m.haber, 0);
-  csv += '"TOTALES","","","","' + totalDebe.toFixed(2) + '","' + totalHaber.toFixed(2) + '","' + (totalDebe - totalHaber).toFixed(2) + '"\n';
+  const totalDebe = movimientos.reduce((s,m) => s+m.debe, 0);
+  const totalHaber = movimientos.reduce((s,m) => s+m.haber, 0);
+  rows.push([]);
+  rows.push(['TOTALES', '', '', '', '', totalDebe, totalHaber, parseFloat((totalDebe-totalHaber).toFixed(2))]);
 
-  const BOM = '\uFEFF';
-  const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'cuenta_corriente_intermediario_' + new Date().toISOString().split('T')[0] + '.csv';
-  a.click();
-  URL.revokeObjectURL(url);
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+
+  // Column widths
+  ws['!cols'] = [{ wch:12 },{ wch:10 },{ wch:20 },{ wch:40 },{ wch:20 },{ wch:12 },{ wch:12 },{ wch:12 }];
+
+  // Style header row (row 4 = index 3)
+  const headerRow = 3;
+  ['A','B','C','D','E','F','G','H'].forEach(col => {
+    const cell = ws[col + (headerRow+1)];
+    if (cell) { cell.s = { font: { bold: true }, fill: { fgColor: { rgb: '1A1814' } }, fontColor: { rgb: 'FFFFFF' } }; }
+  });
+
+  // Style totals row
+  const totalRowIdx = rows.length;
+  ['A','B','C','D','E','F','G','H'].forEach(col => {
+    const cell = ws[col + totalRowIdx];
+    if (cell) cell.s = { font: { bold: true } };
+  });
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Cuenta Corriente');
+  XLSX.writeFile(wb, 'cuenta_corriente_intermediario_' + new Date().toISOString().split('T')[0] + '.xlsx');
+}
+
+// Calcula demora entre pago de cliente y primer envio del intermediario que lo cubre
+function calcularDemoraBadge(pago, envios) {
+  if (pago.estado !== 'confirmado') return '';
+  const fechaPago = new Date(pago.created_at);
+  // Buscar el primer envio posterior al pago que incluya a este cliente
+  const enviosCandidatos = envios
+    .filter(e => new Date(e.created_at) >= fechaPago)
+    .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === pago.cliente_profile_id));
+  if (enviosCandidatos.length === 0) {
+    // Aun no fue enviado - mostrar tiempo transcurrido
+    const horas = (Date.now() - fechaPago.getTime()) / 3600000;
+    const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
+    return '<span style="font-size:11px;color:var(--amber);font-family:'DM Mono',monospace;white-space:nowrap">En espera: ' + label + '</span>';
+  }
+  const primerEnvio = enviosCandidatos[0];
+  const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
+  const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
+  const ok = horas <= 24;
+  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:'DM Mono',monospace;white-space:nowrap">' + label + (ok?' - ok':' - tardio') + '</span>';
 }
 
 // ── EMPRESA: PAGOS CLIENTES ──
 async function renderPagosClientes() {
-  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false });
+  const [pagRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').order('created_at', { ascending: true }),
+  ]);
+  const pagos = pagRes.data || [];
+  const allEnvios = envRes.data || [];
   const c = document.getElementById('main-content');
   c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los pagos informados por clientes</div></div>' +
     (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aun.</div>' :
@@ -645,6 +706,7 @@ async function renderPagosClientes() {
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
+        calcularDemoraBadge(p, allEnvios) +
         (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Ver comprobante</a>' : '<span style="font-size:11px;color:var(--text3)">Sin comprobante</span>') +
         '</div>'
       ).join('')
