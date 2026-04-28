@@ -385,7 +385,6 @@ function buildSidebar(rol) {
       { id:'dashboard', label:'Dashboard' },
       { id:'control-intermediario', label:'Control intermediario' },
       { id:'pagos-clientes', label:'Pagos de clientes' },
-      { id:'saldos-erp', label:'Saldos ERP' },
       { id:'clientes', label:'Clientes' },
       { id:'usuarios', label:'Usuarios' },
     ],
@@ -677,6 +676,83 @@ async function renderPagosClientes() {
         '</div>'
       ).join('')
     ) + '</div>';
+}
+
+// ── EMPRESA: CLIENTES ──
+async function renderClientes() {
+  const [cliRes, profRes] = await Promise.all([
+    db.from('clientes_importados').select('*').order('nombre', { ascending: true }),
+    db.from('profiles').select('id, nombre, email').eq('rol', 'cliente'),
+  ]);
+  const clientes = cliRes.data || [];
+  const profiles = profRes.data || [];
+  const clientesConAcceso = new Set(profiles.map(p => p.nombre.toUpperCase().trim()));
+
+  const c = document.getElementById('main-content');
+  c.innerHTML =
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">' +
+    '<button class="btn" onclick="document.getElementById('import-file').click()">Importar desde Excel</button>' +
+    '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls" onchange="importarClientes(this)"/>' +
+    '<button class="btn btn-primary" onclick="abrirModal('modal-crear-usuario')">+ Crear usuario</button>' +
+    '</div>' +
+    (clientes.length === 0 ?
+      '<div class="card"><div class="empty-state" style="padding:40px"><div style="font-size:24px;margin-bottom:12px">📋</div><div style="font-weight:500;margin-bottom:6px">Sin clientes importados</div><div style="font-size:12px;color:var(--text3)">Importa el listado desde Open Orange para empezar</div></div></div>' :
+      '<div class="card"><div class="card-header"><div class="card-title">Clientes (' + clientes.length + ')</div></div>' +
+      clientes.map(cl => {
+        const tieneAcceso = clientesConAcceso.has(cl.nombre.toUpperCase().trim());
+        const perfil = profiles.find(p => p.nombre.toUpperCase().trim() === cl.nombre.toUpperCase().trim());
+        return '<div class="pago-row">' +
+          '<div class="pago-avatar">' + cl.nombre.substring(0,2).toUpperCase() + '</div>' +
+          '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div>' +
+          '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' · ' + perfil.email : '') + '</div></div>' +
+          (tieneAcceso ? '<span class="badge badge-released">Con acceso</span>' : '<span class="badge badge-pending">Sin acceso</span>') +
+          (!tieneAcceso
+            ? '<button class="btn btn-primary btn-sm" onclick="abrirCrearAcceso('' + cl.nombre.replace(/'/g,"\'") + '')">Dar acceso</button>'
+            : '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" onclick="revocarAcceso('' + (perfil?.id||'') + '','' + cl.nombre.replace(/'/g,"\'") + '')">Revocar</button>'
+          ) +
+          '</div>';
+      }).join('') + '</div>'
+    );
+}
+
+async function importarClientes(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const wb = XLSX.read(e.target.result, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+    const header = (rows[0]||[]).map(h => String(h).toLowerCase().trim());
+    const colCod = header.findIndex(h => h.includes('cod') || h.includes('codigo') || h === 'id');
+    const colNom = header.findIndex(h => h.includes('nom') || h.includes('razon') || h.includes('cliente'));
+    if (colNom === -1) { alert('No se encontro columna de nombre en el Excel.'); return; }
+    const clientes = rows.slice(1)
+      .filter(r => r[colNom])
+      .map(r => ({ nombre: String(r[colNom]).trim(), codigo: colCod >= 0 ? String(r[colCod]||'').trim() : '' }))
+      .filter(c => c.nombre.length > 1);
+    if (!clientes.length) { alert('No se encontraron clientes en el archivo.'); return; }
+    const { error } = await db.from('clientes_importados').upsert(clientes, { onConflict: 'nombre' });
+    if (error) { alert('Error al importar: ' + error.message); return; }
+    alert(clientes.length + ' clientes importados correctamente.');
+    input.value = '';
+    await renderClientes();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function abrirCrearAcceso(nombre) {
+  document.getElementById('nu-nombre').value = nombre;
+  document.getElementById('nu-rol').value = 'cliente';
+  document.getElementById('nu-email').value = '';
+  document.getElementById('nu-pass').value = '';
+  abrirModal('modal-crear-usuario');
+}
+
+async function revocarAcceso(profileId, nombre) {
+  if (!confirm('Revocar acceso de ' + nombre + '?')) return;
+  await db.from('profiles').update({ activo: false }).eq('id', profileId);
+  await renderClientes();
 }
 
 // ── EMPRESA: USUARIOS ──
