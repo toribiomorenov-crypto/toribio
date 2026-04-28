@@ -679,13 +679,13 @@ function calcularDemoraBadge(pago, envios) {
     // Aun no fue enviado - mostrar tiempo transcurrido
     const horas = (Date.now() - fechaPago.getTime()) / 3600000;
     const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
-    return '<span style="font-size:11px;color:var(--amber);font-family:'DM Mono',monospace;white-space:nowrap">En espera: ' + label + '</span>';
+    return '<span style="font-size:11px;color:var(--amber);font-family:DM Mono,monospace;white-space:nowrap">En espera: ' + label + '</span>';
   }
   const primerEnvio = enviosCandidatos[0];
   const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
   const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
   const ok = horas <= 24;
-  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:'DM Mono',monospace;white-space:nowrap">' + label + (ok?' - ok':' - tardio') + '</span>';
+  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:DM Mono,monospace;white-space:nowrap">' + label + (ok?' - ok':' - tardio') + '</span>';
 }
 
 // ── EMPRESA: PAGOS CLIENTES ──
