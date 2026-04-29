@@ -635,6 +635,19 @@ async function exportarExcel() {
   XLSX.writeFile(wb, 'cuenta_corriente_intermediario_' + new Date().toISOString().split('T')[0] + '.xlsx');
 }
 
+// Calcula demora promedio entre pagos de clientes y este envio
+function calcularDemoraEnvio(envio, pagos) {
+  const fechaEnvio = new Date(envio.created_at);
+  const det = envio.detalle_envio || [];
+  const clienteIds = new Set(det.map(d => d.cliente_profile_id));
+  const pagosRel = pagos.filter(p => clienteIds.has(p.cliente_profile_id) && new Date(p.created_at) <= fechaEnvio && p.estado === 'confirmado');
+  if (!pagosRel.length) return '';
+  const avgHoras = pagosRel.reduce((s,p) => s + (fechaEnvio - new Date(p.created_at)) / 3600000, 0) / pagosRel.length;
+  const label = avgHoras < 24 ? avgHoras.toFixed(1).replace('.',',') + 'hs' : (avgHoras/24).toFixed(1).replace('.',',') + 'd';
+  const ok = avgHoras <= 24;
+  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:DM Mono,monospace;white-space:nowrap;margin-right:4px">' + label + (ok?' ok':' tardio') + '</span>';
+}
+
 // Calcula demora entre pago de cliente y primer envio del intermediario que lo cubre
 function calcularDemoraBadge(pago, envios) {
   if (pago.estado !== 'confirmado') return '';
@@ -693,11 +706,13 @@ async function renderClientes() {
 
   const c = document.getElementById('main-content');
 
-  let html = '<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:16px;">';
+  let html = '<div style="display:flex;gap:8px;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;">';
+  html += '<input class="form-input" type="text" id="buscar-cliente" placeholder="Buscar cliente..." style="max-width:280px;"/>';
+  html += '<div style="display:flex;gap:8px;">';
   html += '<button class="btn" id="btn-import-excel">Importar desde Excel</button>';
   html += '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls"/>';
   html += '<button class="btn btn-primary" id="btn-nuevo-usuario">+ Crear usuario</button>';
-  html += '</div>';
+  html += '</div></div>';
 
   if (clientes.length === 0) {
     html += '<div class="card"><div class="empty-state" style="padding:40px">';
@@ -713,7 +728,7 @@ async function renderClientes() {
       const nombreSafe = cl.nombre.replace(/\\/g, '').replace(/'/g, '');
       const perfilId = perfil ? perfil.id : '';
 
-      html += '<div class="pago-row">';
+      html += '<div class="pago-row" data-cliente="' + cl.nombre + '">';
       html += '<div class="pago-avatar">' + cl.nombre.substring(0,2).toUpperCase() + '</div>';
       html += '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div>';
       html += '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' &middot; ' + perfil.email : '') + '</div></div>';
@@ -745,6 +760,18 @@ async function renderClientes() {
   document.querySelectorAll('[class2="revocar-acceso"]').forEach(function(btn) {
     btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
   });
+
+  // Search filter
+  const buscar = document.getElementById('buscar-cliente');
+  if (buscar) {
+    buscar.oninput = function() {
+      const q = this.value.toLowerCase().trim();
+      document.querySelectorAll('.pago-row[data-cliente]').forEach(function(row) {
+        row.style.display = row.getAttribute('data-cliente').toLowerCase().includes(q) ? '' : 'none';
+      });
+    };
+    buscar.focus();
+  }
 }
 
 async function importarClientes(input) {
@@ -851,11 +878,29 @@ async function renderIntEnviar() {
     '<div style="margin:16px 0 8px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label class="form-label" style="margin:0">Composicion del pago (por cliente)</label><button class="btn btn-sm" onclick="agregarLineaCliente()">+ Agregar cliente</button></div>' +
     '<div id="lineas-clientes"></div>' +
     '<div id="env-total-check" style="font-size:12px;color:var(--text3);margin-top:8px;font-family:\'DM Mono\',monospace"></div></div>' +
+    '<div class="form-group"><label class="form-label">Comprobante de transferencia (opcional)</label>' +
+    '<div class="upload-zone" id="env-upload-zone"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF - max 5MB</div>' +
+    '<input type="file" id="env-file" style="display:none" accept="image/*,.pdf"/></div>' +
+    '<div id="env-file-name" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>' +
     '<div id="env-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
     '<button class="btn btn-primary" onclick="registrarEnvio()">Registrar envio</button>' +
     '</div></div>';
 
   agregarLineaCliente();
+
+  // File upload zone
+  setTimeout(function() {
+    const zone = document.getElementById('env-upload-zone');
+    const fileInput = document.getElementById('env-file');
+    if (zone && fileInput) {
+      zone.onclick = function() { fileInput.click(); };
+      fileInput.onchange = function() {
+        if (fileInput.files[0]) {
+          document.getElementById('env-file-name').textContent = 'Archivo: ' + fileInput.files[0].name;
+        }
+      };
+    }
+  }, 100);
 }
 
 let lineaCount = 0;
@@ -909,7 +954,21 @@ async function registrarEnvio() {
     return;
   }
 
-  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref }).select().single();
+  // Upload comprobante if present
+  let comprobante_url = null;
+  const fileInput = document.getElementById('env-file');
+  if (fileInput && fileInput.files[0]) {
+    const file = fileInput.files[0];
+    const ext = file.name.split('.').pop();
+    const path = 'envios/' + Date.now() + '.' + ext;
+    const { data: uploaded } = await db.storage.from('comprobantes').upload(path, file);
+    if (uploaded) {
+      const { data: urlData } = db.storage.from('comprobantes').getPublicUrl(path);
+      comprobante_url = urlData.publicUrl;
+    }
+  }
+
+  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref, comprobante_url }).select().single();
   if (error) { alert('Error al registrar.'); return; }
 
   await db.from('detalle_envio').insert(lineas.map(l => ({ envio_id: envio.id, cliente_profile_id: l.cliente_profile_id, monto: l.monto, nota: l.nota })));
@@ -1034,24 +1093,49 @@ async function renderIntComision() {
   const c = document.getElementById('main-content');
   c.innerHTML =
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
-    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + comisionTotal.toFixed(4) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 4) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">enviado en menos de 24hs</div></div>' +
     '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto calificado</div></div>' +
     '</div>' +
-    '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div></div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
       detalleComision.map(d =>
         '<div class="pago-row">' +
         '<div class="pago-info"><div class="pago-name">' + d.cliente + '</div>' +
-        '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : d.horas + 'hs hasta el envio') + '</div></div>' +
+        '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : String(d.horas).replace('.', ',') + 'hs hasta el envio') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
-          ? '<span class="badge badge-released">Califica · USD ' + d.comision.toFixed(4) + '</span>'
+          ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 4) + '</span>'
           : '<span class="badge badge-late">' + (d.horas === null ? 'Pendiente' : 'No califica') + '</span>'
         ) +
         '</div>'
       ).join('')
     ) + '</div>';
+
+  // Export button
+  const btnExp = document.getElementById('btn-export-comision');
+  if (btnExp) {
+    btnExp.onclick = function() {
+      const rows = [['REPORTE DE COMISION - ' + mesLabel.toUpperCase()], []];
+      rows.push(['Cliente', 'Monto USD', 'Demora (hs)', 'Califica', 'Comision USD']);
+      detalleComision.forEach(function(d) {
+        rows.push([
+          d.cliente,
+          d.monto,
+          d.horas === null ? 'Pendiente' : d.horas,
+          d.califica ? 'Si' : 'No',
+          d.califica ? d.comision : 0
+        ]);
+      });
+      rows.push([]);
+      rows.push(['TOTAL CALIFICA', totalCalifica, '', '', comisionTotal]);
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{wch:30},{wch:14},{wch:14},{wch:10},{wch:14}];
+      XLSX.utils.book_append_sheet(wb, ws, 'Comision');
+      XLSX.writeFile(wb, 'comision_' + mesLabel.replace(' ','_') + '.xlsx');
+    };
+  }
 }
 
 // ── CLIENTE: INFORMAR PAGO ──
@@ -1126,6 +1210,7 @@ async function crearUsuario() {
 
 // HELPERS
 function fmt(n) { return Number(n).toLocaleString('es-AR'); }
+function fmtDec(n, d) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d}); }
 function abrirModal(id) { document.getElementById(id).classList.add('open'); }
 function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
