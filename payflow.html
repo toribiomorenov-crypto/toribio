@@ -954,6 +954,18 @@ async function registrarEnvio() {
     return;
   }
 
+  // Verificar que el monto no supere el saldo disponible
+  const { data: pagRes2 } = await db.from('pagos_cliente').select('monto').eq('estado','confirmado');
+  const { data: envRes2 } = await db.from('envios_intermediario').select('monto_total');
+  const totalConfirmado = (pagRes2||[]).reduce((s,p) => s+Number(p.monto), 0);
+  const totalEnviado = (envRes2||[]).reduce((s,e) => s+Number(e.monto_total), 0);
+  const saldoDisponible = totalConfirmado - totalEnviado;
+
+  if (monto > saldoDisponible + 0.01) {
+    alert('El monto a enviar (USD ' + fmt(monto) + ') supera el saldo disponible (USD ' + fmt(saldoDisponible) + '). No podes enviar mas de lo que recibiste.');
+    return;
+  }
+
   // Upload comprobante if present
   let comprobante_url = null;
   const fileInput = document.getElementById('env-file');
@@ -1070,30 +1082,31 @@ async function renderIntComision() {
 
   pagos.forEach(p => {
     const fechaPago = new Date(p.created_at);
-    const enviosCandidatos = envios
-      .filter(e => new Date(e.created_at) >= fechaPago)
-      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id));
 
-    if (enviosCandidatos.length === 0) {
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', monto: p.monto, horas: null, califica: false, comision: 0 });
+    // Buscar SOLO el primer envio posterior que incluya a este cliente
+    const primerEnvio = envios
+      .filter(e => new Date(e.created_at) >= fechaPago)
+      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
+
+    if (!primerEnvio) {
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: p.monto, horas: null, califica: false, comision: 0 });
       return;
     }
 
-    enviosCandidatos.forEach(e => {
-      const horas = (new Date(e.created_at) - fechaPago) / 3600000;
-      const det = (e.detalle_envio||[]).find(d => d.cliente_profile_id === p.cliente_profile_id);
-      const montoEnvio = det ? Number(det.monto) : 0;
-      const montoCalifica = horas <= 24 ? Math.min(montoEnvio, Number(p.monto)) : 0;
-      if (montoCalifica > 0) totalCalifica += montoCalifica;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', monto: montoEnvio, horas: parseFloat(horas.toFixed(1)), califica: horas <= 24, comision: montoCalifica * 0.0001 });
-    });
+    const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
+    const det = (primerEnvio.detalle_envio||[]).find(d => d.cliente_profile_id === p.cliente_profile_id);
+    const montoEnvio = det ? Number(det.monto) : Number(p.monto);
+    const montoCalifica = horas <= 24 ? Math.min(montoEnvio, Number(p.monto)) : 0;
+    if (montoCalifica > 0) totalCalifica += montoCalifica;
+    detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: Number(p.monto), horas: parseFloat(horas.toFixed(1)), califica: horas <= 24, comision: montoCalifica * 0.0001 });
   });
 
   const comisionTotal = totalCalifica * 0.0001;
   const c = document.getElementById('main-content');
   c.innerHTML =
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
-    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 4) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">enviado en menos de 24hs</div></div>' +
     '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto calificado</div></div>' +
     '</div>' +
@@ -1105,7 +1118,7 @@ async function renderIntComision() {
         '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : String(d.horas).replace('.', ',') + 'hs hasta el envio') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
-          ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 4) + '</span>'
+          ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
           : '<span class="badge badge-late">' + (d.horas === null ? 'Pendiente' : 'No califica') + '</span>'
         ) +
         '</div>'
@@ -1124,11 +1137,11 @@ async function renderIntComision() {
           d.monto,
           d.horas === null ? 'Pendiente' : d.horas,
           d.califica ? 'Si' : 'No',
-          d.califica ? d.comision : 0
+          d.califica ? parseFloat(d.comision.toFixed(2)) : 0
         ]);
       });
       rows.push([]);
-      rows.push(['TOTAL CALIFICA', totalCalifica, '', '', comisionTotal]);
+      rows.push(['TOTAL CALIFICA', totalCalifica, '', '', parseFloat(comisionTotal.toFixed(2))]);
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws['!cols'] = [{wch:30},{wch:14},{wch:14},{wch:10},{wch:14}];
