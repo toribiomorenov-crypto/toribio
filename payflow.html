@@ -387,6 +387,13 @@ async function initApp(user) {
     if (ie || !newProfile) { showErr(document.getElementById('login-error'), 'Error al cargar perfil.'); return; }
     currentProfile = newProfile;
   } else { currentProfile = profile; }
+  if (currentProfile.activo === false) {
+    await db.auth.signOut();
+    const errEl = document.getElementById('login-error');
+    showErr(errEl, 'Tu usuario esta desactivado. Contacta a la empresa.');
+    document.getElementById('login-screen').style.display = 'flex';
+    return;
+  }
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
@@ -849,7 +856,12 @@ async function renderUsuarios() {
       return '<div class="pago-row"><div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
       '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">Usuario: ' + usuarioLabel + '</div></div>' +
       '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span>' +
+      (p.activo===false ? '<span class="badge badge-late">Inactivo</span>' : '') +
       '<button class="btn btn-sm" data-pid="' + p.id + '" data-pnombre="' + p.nombre.replace(/'/g,'').replace(/"/g,'') + '" class2="btn-reset-pass">Reset pass</button>' +
+      (p.rol !== 'empresa'
+        ? '<button class="btn btn-sm" style="color:' + (p.activo!==false?'var(--red)':'var(--green)') + ';border-color:' + (p.activo!==false?'var(--red-border)':'var(--green-border)') + '" data-pid="' + p.id + '" data-activo="' + (p.activo!==false?'true':'false') + '" class2="btn-toggle-user">' + (p.activo!==false?'Desactivar':'Activar') + '</button>'
+        : ''
+      ) +
       '</div>';
     }).join('') + '</div>';
 }
