@@ -178,8 +178,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="login-error" id="login-error"></div>
     <div class="success-msg" id="login-success"></div>
     <div class="form-group">
-      <label class="form-label">Email</label>
-      <input class="form-input" type="email" id="login-email" placeholder="tu@email.com" autocomplete="email"/>
+      <label class="form-label">Usuario</label>
+      <input class="form-input" type="text" id="login-email" placeholder="tu usuario" autocomplete="username"/>
     </div>
     <div class="form-group">
       <label class="form-label">Contraseña</label>
@@ -240,12 +240,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="modal-title">Crear nuevo usuario</div>
     <div class="login-error" id="modal-error"></div>
     <div class="form-group">
-      <label class="form-label">Nombre</label>
+      <label class="form-label">Nombre completo</label>
       <input class="form-input" id="nu-nombre" placeholder="Nombre completo"/>
     </div>
     <div class="form-group">
-      <label class="form-label">Email</label>
-      <input class="form-input" type="email" id="nu-email" placeholder="email@cliente.com"/>
+      <label class="form-label">Usuario (para ingresar)</label>
+      <input class="form-input" id="nu-email" placeholder="ej: clientetoro" autocomplete="off"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Sin espacios ni caracteres especiales</div>
     </div>
     <div class="form-group">
       <label class="form-label">Contraseña inicial</label>
@@ -261,6 +262,23 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModal('modal-crear-usuario')">Cancelar</button>
       <button class="btn btn-primary" onclick="crearUsuario()">Crear usuario</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Reset contraseña -->
+<div class="modal-overlay" id="modal-reset-pass">
+  <div class="modal">
+    <div class="modal-title">Resetear contraseña</div>
+    <div class="login-error" id="reset-error"></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Ingresa la nueva contraseña para <strong id="reset-nombre-label"></strong></p>
+    <div class="form-group">
+      <label class="form-label">Nueva contraseña</label>
+      <input class="form-input" type="text" id="reset-pass" placeholder="min. 6 caracteres"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarModal('modal-reset-pass')">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarResetPass()">Guardar contraseña</button>
     </div>
   </div>
 </div>
@@ -342,13 +360,15 @@ let activeModalData = {};
 
 // AUTH
 async function doLogin() {
-  const email = document.getElementById('login-email').value.trim();
+  let usuario = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
   errEl.style.display = 'none';
-  if (!email || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  if (!usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  // Si no tiene @, convertir a formato email interno
+  const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
-  if (error) { showErr(errEl, 'Email o contrasena incorrectos.'); return; }
+  if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
   await initApp(data.user);
 }
 
@@ -803,7 +823,9 @@ async function importarClientes(input) {
 function abrirCrearAcceso(nombre) {
   document.getElementById('nu-nombre').value = nombre;
   document.getElementById('nu-rol').value = 'cliente';
-  document.getElementById('nu-email').value = '';
+  // Pre-fill usuario: lowercase, no spaces
+  const usuarioSugerido = nombre.toLowerCase().replace(/\s+/g,'').replace(/[^a-z0-9]/g,'').substring(0,20);
+  document.getElementById('nu-email').value = usuarioSugerido;
   document.getElementById('nu-pass').value = '';
   abrirModal('modal-crear-usuario');
 }
@@ -821,11 +843,15 @@ async function renderUsuarios() {
   c.innerHTML =
     '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;"><button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Nuevo usuario</button></div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Usuarios del sistema</div></div>' +
-    (profiles||[]).map(p =>
-      '<div class="pago-row"><div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
-      '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">' + p.email + '</div></div>' +
-      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span></div>'
-    ).join('') + '</div>';
+    (profiles||[]).map(p => {
+      const usuario = p.email.replace('@payflow.local','');
+      const usuarioLabel = p.email.includes('@payflow.local') ? usuario : p.email;
+      return '<div class="pago-row"><div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
+      '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">Usuario: ' + usuarioLabel + '</div></div>' +
+      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span>' +
+      '<button class="btn btn-sm" data-pid="' + p.id + '" data-pnombre="' + p.nombre.replace(/'/g,'').replace(/"/g,'') + '" class2="btn-reset-pass">Reset pass</button>' +
+      '</div>';
+    }).join('') + '</div>';
 }
 
 // ── INTERMEDIARIO: HOME ──
@@ -1095,9 +1121,8 @@ async function renderIntComision() {
     }
 
     const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
-    const det = (primerEnvio.detalle_envio||[]).find(d => d.cliente_profile_id === p.cliente_profile_id);
-    const montoEnvio = det ? Number(det.monto) : Number(p.monto);
-    const montoCalifica = horas <= 24 ? Math.min(montoEnvio, Number(p.monto)) : 0;
+    // Comision sobre el monto total del pago del cliente si llego dentro de 24hs
+    const montoCalifica = horas <= 24 ? Number(p.monto) : 0;
     if (montoCalifica > 0) totalCalifica += montoCalifica;
     detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: Number(p.monto), horas: parseFloat(horas.toFixed(1)), califica: horas <= 24, comision: montoCalifica * 0.0001 });
   });
@@ -1208,17 +1233,39 @@ async function informarPago() {
 // USUARIOS
 async function crearUsuario() {
   const nombre = document.getElementById('nu-nombre').value.trim();
-  const email = document.getElementById('nu-email').value.trim();
+  const usuario = document.getElementById('nu-email').value.trim().toLowerCase().replace(/[^a-z0-9._-]/g,'');
   const pass = document.getElementById('nu-pass').value;
   const rol = document.getElementById('nu-rol').value;
   const errEl = document.getElementById('modal-error');
   errEl.style.display = 'none';
-  if (!nombre || !email || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  if (!nombre || !usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
+  const email = usuario + '@payflow.local';
   const { data, error } = await db.auth.signUp({ email, password: pass, options: { data: { nombre, rol } } });
   if (error) { showErr(errEl, error.message); return; }
   cerrarModal('modal-crear-usuario');
-  alert('Usuario "' + nombre + '" creado. Ya puede ingresar con ' + email);
+  alert('Usuario creado correctamente.\n\nNombre: ' + nombre + '\nUsuario: ' + usuario + '\nContrasena: ' + pass + '\n\nGuarda estos datos para compartirlos con el usuario.');
   await renderUsuarios();
+}
+
+let resetProfileId = null;
+function abrirResetPass(profileId, nombre) {
+  resetProfileId = profileId;
+  document.getElementById('reset-nombre-label').textContent = nombre;
+  document.getElementById('reset-pass').value = '';
+  document.getElementById('reset-error').style.display = 'none';
+  abrirModal('modal-reset-pass');
+}
+
+async function confirmarResetPass() {
+  const pass = document.getElementById('reset-pass').value;
+  const errEl = document.getElementById('reset-error');
+  if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
+  // Update via Supabase admin — requires service role, so we store new pass in profiles as temp
+  // For now alert the admin to use Supabase dashboard
+  const { error } = await db.from('profiles').update({ temp_pass: pass }).eq('id', resetProfileId);
+  cerrarModal('modal-reset-pass');
+  alert('Para resetear la contrasena, ve a Supabase > Authentication > Users, buscá el usuario y usá "Send password recovery" o editá la contrasena directamente.');
 }
 
 // HELPERS
