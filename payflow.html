@@ -892,6 +892,20 @@ async function renderUsuarios() {
       ) +
       '</div>';
     }).join('') + '</div>';
+
+  // Attach events after DOM update
+  document.querySelectorAll('[class2="btn-reset-pass"]').forEach(function(btn) {
+    btn.onclick = function() { abrirResetPass(this.getAttribute('data-pid'), this.getAttribute('data-pnombre')); };
+  });
+  document.querySelectorAll('[class2="btn-toggle-user"]').forEach(function(btn) {
+    btn.onclick = async function() {
+      const pid = this.getAttribute('data-pid');
+      const activo = this.getAttribute('data-activo') === 'true';
+      if (!confirm('Confirmas ' + (activo ? 'desactivar' : 'activar') + ' este usuario?')) return;
+      await db.from('profiles').update({ activo: !activo }).eq('id', pid);
+      await renderUsuarios();
+    };
+  });
 }
 
 // ── INTERMEDIARIO: HOME ──
