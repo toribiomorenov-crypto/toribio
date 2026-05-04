@@ -267,11 +267,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
     <div class="form-group">
       <label class="form-label">Usuario (para ingresar)</label>
       <input class="form-input" id="nu-email" placeholder="ej: clientetoro" autocomplete="off"/>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">Sin espacios ni caracteres especiales</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Solo letras, numeros y puntos. Sin espacios.</div>
     </div>
     <div class="form-group">
       <label class="form-label">Contraseña inicial</label>
-      <input class="form-input" type="text" id="nu-pass" placeholder="min. 6 caracteres"/>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" type="text" id="nu-pass" placeholder="min. 6 caracteres" style="flex:1"/>
+        <button class="btn btn-sm" type="button" onclick="generarPassAleatoria()">Generar</button>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Rol</label>
@@ -495,7 +498,7 @@ async function loadView(id) {
   document.getElementById('page-title').textContent = title;
   document.getElementById('page-subtitle').textContent = sub;
 
-  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
   if (views[id]) await views[id]();
 }
 
@@ -1106,6 +1109,108 @@ async function renderIntHistorial() {
     ) + '</div>';
 }
 
+// ── EMPRESA: COMISION INTERMEDIARIO ──
+async function renderComisionEmpresa() {
+  const now = new Date();
+  const mesLabel = now.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+  const primerDia = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const ultimoDia = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59).toISOString();
+
+  const [pagRes, envRes, pagosComRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
+  ]);
+
+  const pagos = pagRes.data || [];
+  const envios = envRes.data || [];
+  const pagosCom = pagosComRes.data || [];
+
+  // Calculate eligible payments same logic as intermediario view
+  let items = [];
+  pagos.forEach(p => {
+    const fechaPago = new Date(p.created_at);
+    const primerEnvio = envios
+      .filter(e => new Date(e.created_at) >= fechaPago)
+      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    if (!primerEnvio) return;
+    const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
+    if (horas > 24) return; // Only show qualifying ones
+    items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: Number(p.monto), horas: parseFloat(horas.toFixed(1)), comision: Number(p.monto) * 0.0001 });
+  });
+
+  const totalComision = items.reduce((s,i) => s + i.comision, 0);
+  const totalPagado = pagosCom.filter(p => {
+    const f = new Date(p.created_at);
+    return f >= new Date(primerDia) && f <= new Date(ultimoDia);
+  }).reduce((s,p) => s + Number(p.monto), 0);
+  const saldoComision = totalComision - totalPagado;
+
+  const c = document.getElementById('main-content');
+  let html = '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+    '<div class="metric"><div class="metric-label">Comision devengada</div><div class="metric-value">USD ' + fmtDec(totalComision, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Ya pagado</div><div class="metric-value ok">USD ' + fmtDec(totalPagado, 2) + '</div><div class="metric-sub">este mes</div></div>' +
+    '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
+    '</div>';
+
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos que califican este mes</div></div>';
+  if (items.length === 0) {
+    html += '<div class="empty-state">Sin pagos que califiquen este mes.</div>';
+  } else {
+    items.forEach(function(item) {
+      html += '<div class="pago-row">' +
+        '<div class="pago-info"><div class="pago-name">' + item.cliente + '</div>' +
+        '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + ' · ' + String(item.horas).replace('.',',') + 'hs hasta envio</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' +
+        '<span class="badge badge-released">Comision: USD ' + fmtDec(item.comision, 2) + '</span>' +
+        '</div>';
+    });
+  }
+  html += '</div>';
+
+  html += '<div class="card"><div class="card-header"><div class="card-title">Registrar pago de comision</div></div><div class="form-pad">' +
+    '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;font-size:13px">' +
+    'Saldo pendiente: <strong>USD ' + fmtDec(saldoComision, 2) + '</strong>' +
+    '</div>' +
+    '<div class="grid-2">' +
+    '<div class="form-group"><label class="form-label">Monto pagado</label><input class="form-input" type="number" id="com-monto" placeholder="0.00"/></div>' +
+    '<div class="form-group"><label class="form-label">Fecha</label><input class="form-input" type="date" id="com-fecha"/></div>' +
+    '</div>' +
+    '<div class="form-group"><label class="form-label">Notas (opcional)</label><input class="form-input" id="com-notas" placeholder="Referencia del pago..."/></div>' +
+    '<div id="com-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
+    '<button class="btn btn-primary" id="btn-pagar-comision">Registrar pago</button>' +
+    '</div></div>';
+
+  if (pagosCom.length > 0) {
+    html += '<div class="card"><div class="card-header"><div class="card-title">Historial de pagos de comision</div></div>';
+    pagosCom.forEach(function(p) {
+      html += '<div class="data-row"><span class="data-label">' + new Date(p.created_at).toLocaleDateString('es-AR') + (p.notas ? ' · ' + p.notas : '') + '</span><span class="data-value">USD ' + fmtDec(p.monto, 2) + '</span></div>';
+    });
+    html += '</div>';
+  }
+
+  c.innerHTML = html;
+
+  const btnPagar = document.getElementById('btn-pagar-comision');
+  if (btnPagar) {
+    btnPagar.onclick = async function() {
+      const monto = parseFloat(document.getElementById('com-monto').value);
+      const fecha = document.getElementById('com-fecha').value;
+      const notas = document.getElementById('com-notas').value;
+      if (!monto || !fecha) { alert('Completa monto y fecha.'); return; }
+      if (monto > saldoComision + 0.01) { alert('El monto supera el saldo pendiente (USD ' + fmtDec(saldoComision, 2) + ').'); return; }
+      btnPagar.disabled = true; btnPagar.textContent = 'Guardando...';
+      const { error } = await db.from('comision_pagos').insert({ monto, fecha_pago: fecha, notas });
+      if (error) { alert('Error: ' + error.message); btnPagar.disabled = false; btnPagar.textContent = 'Registrar pago'; return; }
+      const msg = document.getElementById('com-msg');
+      msg.textContent = 'Pago de comision registrado correctamente.';
+      msg.style.display = 'flex';
+      setTimeout(() => renderComisionEmpresa(), 1500);
+    };
+  }
+}
+
 // ── CLIENTE: HOME ──
 async function renderCliHome() {
   const cuenta = null;
@@ -1382,6 +1487,13 @@ async function cambiarPassObligatorio() {
   buildSidebar(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
+}
+
+function generarPassAleatoria() {
+  const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+  let pass = '';
+  for (let i = 0; i < 8; i++) pass += chars[Math.floor(Math.random() * chars.length)];
+  document.getElementById('nu-pass').value = pass;
 }
 
 // HELPERS
