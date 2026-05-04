@@ -1132,6 +1132,7 @@ async function renderComisionEmpresa() {
   pagos.forEach(p => {
     const fechaPago = new Date(p.created_at);
     const primerEnvio = envios
+      .filter(e => e.confirmado === true)
       .filter(e => new Date(e.created_at) >= fechaPago)
       .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
       .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
@@ -1269,8 +1270,9 @@ async function renderIntComision() {
   pagos.forEach(p => {
     const fechaPago = new Date(p.created_at);
 
-    // Buscar SOLO el primer envio posterior que incluya a este cliente
+    // Solo envios CONFIRMADOS por la empresa
     const primerEnvio = envios
+      .filter(e => e.confirmado === true)
       .filter(e => new Date(e.created_at) >= fechaPago)
       .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
       .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
