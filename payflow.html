@@ -581,54 +581,111 @@ async function renderControlIntermediario() {
 
   const pagos = pagCliRes.data || [];
   const envios = enviosRes.data || [];
-  const totalRecibido = pagos.filter(p=>p.estado==='confirmado').reduce((s,p) => s+Number(p.monto), 0);
-  const totalEnviado = envios.reduce((s,e) => s+Number(e.monto_total), 0);
-  const enPoder = totalRecibido - totalEnviado;
-  const pct = totalRecibido > 0 ? Math.round((totalEnviado/totalRecibido)*100) : 0;
+  const enviosConfirmados = envios.filter(e => e.confirmado === true);
+  const enviosPendientes = envios.filter(e => e.confirmado !== true);
+  const totalRecibido = pagos.filter(p => p.estado === 'confirmado').reduce((s,p) => s+Number(p.monto), 0);
+  const totalConfirmado = enviosConfirmados.reduce((s,e) => s+Number(e.monto_total), 0);
+  const totalPendConf = enviosPendientes.reduce((s,e) => s+Number(e.monto_total), 0);
+  const enPoder = totalRecibido - totalConfirmado - totalPendConf;
+  const pct = totalRecibido > 0 ? Math.round(((totalConfirmado+totalPendConf)/totalRecibido)*100) : 0;
 
   const c = document.getElementById('main-content');
-  c.innerHTML =
+  let html =
     '<div class="card section-gap"><div class="card-header"><div class="card-title">Posicion del intermediario</div><button class="btn btn-sm" onclick="exportarExcel()">Exportar Excel</button></div>' +
-    '<div class="progress-container"><div class="progress-header"><span class="progress-label">Enviado a empresa del total recibido de clientes</span><span class="progress-value">USD ' + fmt(totalEnviado) + ' / USD ' + fmt(totalRecibido) + '</span></div>' +
+    '<div class="progress-container"><div class="progress-header"><span class="progress-label">Enviado a empresa del total recibido de clientes</span><span class="progress-value">USD ' + fmt(totalConfirmado+totalPendConf) + ' / USD ' + fmt(totalRecibido) + '</span></div>' +
     '<div class="progress-bar"><div class="progress-fill ' + (enPoder>0?'danger':'') + '" style="width:' + pct + '%"></div></div></div>' +
-    '<div class="data-row"><span class="data-label">Total recibido de clientes (confirmado)</span><span class="data-value">USD ' + fmt(totalRecibido) + '</span></div>' +
-    '<div class="data-row"><span class="data-label">Total enviado a la empresa</span><span class="data-value">USD ' + fmt(totalEnviado) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">Total recibido de clientes</span><span class="data-value">USD ' + fmt(totalRecibido) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">Enviado y confirmado por empresa</span><span class="data-value ok">USD ' + fmt(totalConfirmado) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">Enviado pendiente de confirmar</span><span class="data-value ' + (totalPendConf>0?'danger':'') + '">USD ' + fmt(totalPendConf) + '</span></div>' +
     '<div class="data-row"><span class="data-label">En poder del intermediario</span><span class="data-value ' + (enPoder>0?'danger':'ok') + '">USD ' + fmt(enPoder) + '</span></div>' +
-    '</div>' +
+    '</div>';
 
-    '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios a la empresa</div></div>' +
-    (envios.length === 0 ? '<div class="empty-state">Sin envios registrados.</div>' :
-      envios.map(e => {
-        const detalle = e.detalle_envio || [];
-        return '<div style="border-bottom:0.5px solid var(--border)">' +
-          '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'env-' + e.id + '\')">' +
-          '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia?' - '+e.referencia:'') + '</div>' +
-          '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' - ' + detalle.length + ' cliente(s) incluidos</div></div>' +
-          '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
-          '<span style="font-size:11px;color:var(--text3);cursor:pointer">ver detalle</span>' +
-          '</div>' +
-          '<div id="env-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
-          '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
-          '<thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
-          detalle.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:\'DM Mono\',monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
-          '</tbody></table></div>' +
-          '</div>';
-      }).join('')
-    ) + '</div>' +
+  // Envios PENDIENTES de confirmar por empresa
+  if (enviosPendientes.length > 0) {
+    html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios pendientes de confirmar recepcion</div><span class="badge badge-late">' + enviosPendientes.length + ' sin confirmar</span></div>';
+    enviosPendientes.forEach(function(e) {
+      const det = e.detalle_envio || [];
+      html +=
+        '<div style="border-bottom:0.5px solid var(--border)">' +
+        '<div class="pago-row">' +
+        '<div class="pago-info">' +
+        '<div class="pago-name">' + e.medio + (e.referencia ? ' — ' + e.referencia : '') + '</div>' +
+        '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' · ' + det.length + ' cliente(s)</div>' +
+        '</div>' +
+        '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
+        (e.comprobante_url ? '<a href="' + e.comprobante_url + '" target="_blank" class="btn btn-sm" style="text-decoration:none">Ver comprobante</a>' : '') +
+        '<button class="btn btn-primary btn-sm" data-envio-id="' + e.id + '" data-type="btn-confirmar-envio">Confirmar recepcion</button>' +
+        '<span style="font-size:11px;color:var(--blue);cursor:pointer;white-space:nowrap" data-toggle-id="penv-' + e.id + '" data-type="toggle-det">ver detalle</span>' +
+        '</div>' +
+        '<div id="penv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+        '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
+        det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
+        '</tbody></table></div></div>';
+    });
+    html += '</div>';
+  }
 
-    '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
+  // Envios CONFIRMADOS
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios confirmados</div></div>';
+  if (enviosConfirmados.length === 0) {
+    html += '<div class="empty-state">Sin envios confirmados aun.</div>';
+  } else {
+    enviosConfirmados.forEach(function(e) {
+      const det = e.detalle_envio || [];
+      html +=
+        '<div style="border-bottom:0.5px solid var(--border)">' +
+        '<div class="pago-row" style="cursor:pointer" data-type="toggle-det" data-toggle="cenv-" + e.id>' +
+        '<div class="pago-info">' +
+        '<div class="pago-name">' + e.medio + (e.referencia ? ' — ' + e.referencia : '') + '</div>' +
+        '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' · Confirmado ' + new Date(e.confirmado_at).toLocaleDateString('es-AR') + '</div>' +
+        '</div>' +
+        '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
+        '<span class="badge badge-released">Confirmado</span>' +
+        calcularDemoraEnvio(e, pagos) +
+        '</div>' +
+        '<div id="cenv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+        '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
+        det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
+        '</tbody></table></div></div>';
+    });
+  }
+  html += '</div>';
+
+  // Pagos de clientes
+  html += '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
     (pagos.length === 0 ? '<div class="empty-state">Sin pagos registrados.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
         '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' — ' + p.forma_pago + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>';
-}
 
+  c.innerHTML = html;
+
+  // Toggle detalle
+  document.querySelectorAll('[data-type="toggle-det"]').forEach(function(el) {
+    el.addEventListener('click', function() { toggleDetalle(this.getAttribute('data-toggle-id')); });
+  });
+
+  // Attach confirm buttons
+  document.querySelectorAll('[data-type="btn-confirmar-envio"]').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      const envioId = this.getAttribute('data-envio-id');
+      if (!confirm('Confirmas que recibiste este pago del intermediario?')) return;
+      this.disabled = true;
+      this.textContent = 'Confirmando...';
+      const { error } = await db.from('envios_intermediario')
+        .update({ confirmado: true, confirmado_at: new Date().toISOString() })
+        .eq('id', envioId);
+      if (error) { alert('Error: ' + error.message); this.disabled = false; this.textContent = 'Confirmar recepcion'; return; }
+      await renderControlIntermediario();
+    });
+  });
+}
 function toggleDetalle(id) {
   const el = document.getElementById(id);
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
@@ -1002,18 +1059,51 @@ async function renderIntEnviar() {
 
 let lineaCount = 0;
 async function agregarLineaCliente() {
-  const { data: profiles } = await db.from('profiles').select('id, nombre').eq('rol','cliente');
+  const { data: profiles } = await db.from('profiles').select('id, nombre').eq('rol','cliente').order('nombre');
   lineaCount++;
   const id = 'linea-' + lineaCount;
   const div = document.createElement('div');
   div.id = id;
-  div.style.cssText = 'display:grid;grid-template-columns:1fr 120px 1fr auto;gap:8px;margin-bottom:8px;align-items:center';
+  div.style.cssText = 'margin-bottom:10px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)';
+
+  const optsHtml = (profiles||[]).map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('');
+
   div.innerHTML =
-    '<select class="form-select" id="' + id + '-cli"><option value="">Seleccionar cliente</option>' + (profiles||[]).map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('') + '</select>' +
-    '<input class="form-input" type="number" id="' + id + '-monto" placeholder="USD" oninput="actualizarTotal()"/>' +
-    '<input class="form-input" id="' + id + '-nota" placeholder="Nota (opcional)"/>' +
-    '<button class="btn btn-sm" onclick="document.getElementById(\'' + id + '\').remove();actualizarTotal()" style="padding:7px 10px">x</button>';
+    '<div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;align-items:start;margin-bottom:6px">' +
+    '<div>' +
+    '<input class="form-input" type="text" id="' + id + '-search" placeholder="Escribi para buscar cliente..." style="margin-bottom:4px"/>' +
+    '<select class="form-select" id="' + id + '-cli"><option value="">-- seleccionar --</option>' + optsHtml + '</select>' +
+    '</div>' +
+    '<input class="form-input" type="number" id="' + id + '-monto" placeholder="USD 0.00" oninput="actualizarTotal()"/>' +
+    '<button class="btn btn-sm" style="padding:7px 10px" id="' + id + '-remove">x</button>' +
+    '</div>' +
+    '<input class="form-input" id="' + id + '-nota" placeholder="Nota (opcional)"/>';
+
   document.getElementById('lineas-clientes').appendChild(div);
+
+  // Wire search
+  const searchEl = document.getElementById(id + '-search');
+  const selectEl = document.getElementById(id + '-cli');
+  const removeBtn = document.getElementById(id + '-remove');
+
+  searchEl.addEventListener('input', function() {
+    const q = this.value.toLowerCase().trim();
+    Array.from(selectEl.options).forEach(function(opt) {
+      if (!opt.value) { opt.hidden = false; return; }
+      opt.hidden = !opt.text.toLowerCase().includes(q);
+    });
+    const visible = Array.from(selectEl.options).filter(o => o.value && !o.hidden);
+    if (visible.length === 1) {
+      selectEl.value = visible[0].value;
+    }
+  });
+
+  removeBtn.addEventListener('click', function() {
+    div.remove();
+    actualizarTotal();
+  });
+
+  searchEl.focus();
 }
 
 function actualizarTotal() {
