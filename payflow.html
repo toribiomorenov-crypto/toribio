@@ -1272,12 +1272,36 @@ function abrirResetPass(profileId, nombre) {
 async function confirmarResetPass() {
   const pass = document.getElementById('reset-pass').value;
   const errEl = document.getElementById('reset-error');
+  errEl.style.display = 'none';
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
-  // Update via Supabase admin — requires service role, so we store new pass in profiles as temp
-  // For now alert the admin to use Supabase dashboard
-  const { error } = await db.from('profiles').update({ temp_pass: pass }).eq('id', resetProfileId);
-  cerrarModal('modal-reset-pass');
-  alert('Para resetear la contrasena, ve a Supabase > Authentication > Users, buscá el usuario y usá "Send password recovery" o editá la contrasena directamente.');
+  if (!resetProfileId) { showErr(errEl, 'Error: no se encontro el usuario.'); return; }
+
+  const btn = document.querySelector('[onclick="confirmarResetPass()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+
+  try {
+    const { data: sessionData } = await db.auth.getSession();
+    const token = sessionData?.session?.access_token;
+
+    const res = await fetch('https://lgrbdzutcoejdyymquku.supabase.co/functions/v1/reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token,
+      },
+      body: JSON.stringify({ userId: resetProfileId, newPassword: pass })
+    });
+
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+
+    cerrarModal('modal-reset-pass');
+    alert('Contrasena actualizada correctamente.');
+  } catch(e) {
+    showErr(errEl, 'Error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar contrasena'; }
+  }
 }
 
 // HELPERS
