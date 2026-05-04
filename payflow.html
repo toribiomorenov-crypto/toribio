@@ -631,25 +631,28 @@ async function renderControlIntermediario() {
     html += '<div class="empty-state">Sin envios confirmados aun.</div>';
   } else {
     enviosConfirmados.forEach(function(e) {
-      const det = e.detalle_envio || [];
-      html +=
-        '<div style="border-bottom:0.5px solid var(--border)">' +
-        '<div class="pago-row" style="cursor:pointer" data-type="toggle-det" data-toggle="cenv-" + e.id>' +
-        '<div class="pago-info">' +
-        '<div class="pago-name">' + e.medio + (e.referencia ? ' — ' + e.referencia : '') + '</div>' +
-        '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' · Confirmado ' + new Date(e.confirmado_at).toLocaleDateString('es-AR') + '</div>' +
-        '</div>' +
-        '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
-        '<span class="badge badge-released">Confirmado</span>' +
-        calcularDemoraEnvio(e, pagos) +
-        '</div>' +
-        '<div id="cenv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
-        '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
-        det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
-        '</tbody></table></div></div>';
-    });
-  }
-  html += '</div>';
+    const det = e.detalle_envio || [];
+    const demora = calcularDemoraEnvioTexto(e, pagos);
+    html +=
+      '<div style="display:grid;grid-template-columns:1fr auto;gap:0;border-bottom:0.5px solid var(--border)">' +
+      '<div style="padding:14px 18px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
+      '<span style="font-size:14px;font-weight:500;font-family:DM Mono,monospace">USD ' + fmt(e.monto_total) + '</span>' +
+      '<span class="badge badge-released" style="font-size:10px">Confirmado</span>' +
+      (demora.label ? '<span style="font-size:11px;font-family:DM Mono,monospace;color:' + demora.color + '">' + demora.label + '</span>' : '') +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text3)">' + new Date(e.created_at).toLocaleDateString('es-AR') + ' · ' + e.medio + (e.referencia ? ' · ' + e.referencia : '') + ' · ' + det.length + ' cliente(s)</div>' +
+      '</div>' +
+      '<div style="padding:14px 18px;display:flex;align-items:center">' +
+      '<button style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;white-space:nowrap" data-type="toggle-cenv" data-id="' + e.id + '">ver detalle</button>' +
+      '</div>' +
+      '</div>' +
+      '<div id="cenv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+      '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+      '<thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead>' +
+      '<tbody>' + det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') + '</tbody>' +
+      '</table></div>';
+  });
 
   // Pagos de clientes
   html += '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
@@ -670,6 +673,9 @@ async function renderControlIntermediario() {
   document.querySelectorAll('[data-type="toggle-det"]').forEach(function(el) {
     el.addEventListener('click', function() { toggleDetalle(this.getAttribute('data-toggle-id')); });
   });
+  document.querySelectorAll('[data-type="toggle-cenv"]').forEach(function(el) {
+    el.addEventListener('click', function() { toggleDetalle('cenv-' + this.getAttribute('data-id')); });
+  });
 
   // Attach confirm buttons
   document.querySelectorAll('[data-type="btn-confirmar-envio"]').forEach(function(btn) {
@@ -685,6 +691,7 @@ async function renderControlIntermediario() {
       await renderControlIntermediario();
     });
   });
+}
 }
 function toggleDetalle(id) {
   const el = document.getElementById(id);
@@ -755,6 +762,23 @@ async function exportarExcel() {
 }
 
 // Calcula demora promedio entre pagos de clientes y este envio
+function calcularDemoraEnvioTexto(envio, pagos) {
+  const fechaEnvio = new Date(envio.created_at);
+  const det = envio.detalle_envio || [];
+  const clienteIds = new Set(det.map(d => d.cliente_profile_id));
+  let tiempos = [];
+  clienteIds.forEach(function(cid) {
+    const masReciente = pagos
+      .filter(p => p.cliente_profile_id === cid && p.estado === 'confirmado' && new Date(p.created_at) <= fechaEnvio)
+      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    if (masReciente) tiempos.push((fechaEnvio - new Date(masReciente.created_at)) / 3600000);
+  });
+  if (!tiempos.length) return { label: '', color: 'var(--text3)' };
+  const avg = tiempos.reduce((s,h) => s+h, 0) / tiempos.length;
+  const label = avg < 1 ? Math.round(avg * 60) + 'min' : avg < 24 ? avg.toFixed(1).replace('.',',') + 'hs' : (avg/24).toFixed(1).replace('.',',') + 'd';
+  return { label, color: avg <= 24 ? 'var(--green)' : 'var(--red)' };
+}
+
 function calcularDemoraEnvio(envio, pagos) {
   const fechaEnvio = new Date(envio.created_at);
   const det = envio.detalle_envio || [];
@@ -1064,45 +1088,50 @@ async function agregarLineaCliente() {
   const id = 'linea-' + lineaCount;
   const div = document.createElement('div');
   div.id = id;
-  div.style.cssText = 'margin-bottom:10px;padding:10px;background:var(--surface2);border-radius:var(--radius-sm);border:1px solid var(--border)';
-
-  const optsHtml = (profiles||[]).map(p => '<option value="' + p.id + '">' + p.nombre + '</option>').join('');
+  div.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:8px;position:relative';
 
   div.innerHTML =
-    '<div style="display:grid;grid-template-columns:1fr 130px auto;gap:8px;align-items:start;margin-bottom:6px">' +
-    '<div>' +
-    '<input class="form-input" type="text" id="' + id + '-search" placeholder="Escribi para buscar cliente..." style="margin-bottom:4px"/>' +
-    '<select class="form-select" id="' + id + '-cli"><option value="">-- seleccionar --</option>' + optsHtml + '</select>' +
+    '<div style="flex:1;position:relative">' +
+    '<input class="form-input" type="text" id="' + id + '-search" placeholder="Buscar cliente..." autocomplete="off"/>' +
+    '<div id="' + id + '-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border2);border-radius:var(--radius-sm);z-index:100;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.08)"></div>' +
+    '<input type="hidden" id="' + id + '-cli"/>' +
     '</div>' +
-    '<input class="form-input" type="number" id="' + id + '-monto" placeholder="USD 0.00" oninput="actualizarTotal()"/>' +
-    '<button class="btn btn-sm" style="padding:7px 10px" id="' + id + '-remove">x</button>' +
-    '</div>' +
-    '<input class="form-input" id="' + id + '-nota" placeholder="Nota (opcional)"/>';
+    '<input class="form-input" type="number" id="' + id + '-monto" placeholder="USD 0.00" style="width:120px;flex-shrink:0" oninput="actualizarTotal()"/>' +
+    '<input class="form-input" id="' + id + '-nota" placeholder="Nota" style="width:140px;flex-shrink:0"/>' +
+    '<button class="btn btn-sm" id="' + id + '-remove" style="padding:7px 10px;flex-shrink:0">x</button>';
 
   document.getElementById('lineas-clientes').appendChild(div);
 
-  // Wire search
   const searchEl = document.getElementById(id + '-search');
-  const selectEl = document.getElementById(id + '-cli');
+  const dropEl = document.getElementById(id + '-dropdown');
+  const hiddenEl = document.getElementById(id + '-cli');
   const removeBtn = document.getElementById(id + '-remove');
+  const profs = profiles || [];
 
-  searchEl.addEventListener('input', function() {
-    const q = this.value.toLowerCase().trim();
-    Array.from(selectEl.options).forEach(function(opt) {
-      if (!opt.value) { opt.hidden = false; return; }
-      opt.hidden = !opt.text.toLowerCase().includes(q);
+  function showDropdown(q) {
+    const filtered = q ? profs.filter(p => p.nombre.toLowerCase().includes(q.toLowerCase())) : profs;
+    if (!filtered.length) { dropEl.style.display = 'none'; return; }
+    dropEl.innerHTML = filtered.map(p =>
+      '<div data-id="' + p.id + '" data-nombre="' + p.nombre.replace(/"/g,'') + '" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border)">' + p.nombre + '</div>'
+    ).join('');
+    dropEl.style.display = 'block';
+    dropEl.querySelectorAll('div').forEach(function(item) {
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        searchEl.value = this.getAttribute('data-nombre');
+        hiddenEl.value = this.getAttribute('data-id');
+        dropEl.style.display = 'none';
+      });
+      item.addEventListener('mouseover', function() { this.style.background = 'var(--surface2)'; });
+      item.addEventListener('mouseout', function() { this.style.background = ''; });
     });
-    const visible = Array.from(selectEl.options).filter(o => o.value && !o.hidden);
-    if (visible.length === 1) {
-      selectEl.value = visible[0].value;
-    }
-  });
+  }
 
-  removeBtn.addEventListener('click', function() {
-    div.remove();
-    actualizarTotal();
-  });
+  searchEl.addEventListener('input', function() { showDropdown(this.value); });
+  searchEl.addEventListener('focus', function() { showDropdown(this.value); });
+  searchEl.addEventListener('blur', function() { setTimeout(function() { dropEl.style.display = 'none'; }, 150); });
 
+  removeBtn.addEventListener('click', function() { div.remove(); actualizarTotal(); });
   searchEl.focus();
 }
 
