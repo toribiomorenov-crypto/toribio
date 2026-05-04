@@ -789,10 +789,10 @@ async function renderClientes() {
       html += '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' &middot; ' + perfil.email : '') + '</div></div>';
       if (tieneAcceso) {
         html += '<span class="badge badge-released">Con acceso</span>';
-        html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + perfilId + '" data-nombre="' + nombreSafe + '" class2="revocar-acceso">Revocar</button>';
+        html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + perfilId + '" data-nombre="' + nombreSafe + '" data-type="revocar-acceso">Revocar</button>';
       } else {
         html += '<span class="badge badge-pending">Sin acceso</span>';
-        html += '<button class="btn btn-primary btn-sm" data-nombre="' + nombreSafe + '" class2="dar-acceso">Dar acceso</button>';
+        html += '<button class="btn btn-primary btn-sm" data-nombre="' + nombreSafe + '" data-type="dar-acceso">Dar acceso</button>';
       }
       html += '</div>';
     });
@@ -809,10 +809,10 @@ async function renderClientes() {
   const importFile = document.getElementById('import-file');
   if (importFile) importFile.onchange = function() { importarClientes(this); };
 
-  document.querySelectorAll('[class2="dar-acceso"]').forEach(function(btn) {
+  document.querySelectorAll('[data-type="dar-acceso"]').forEach(function(btn) {
     btn.onclick = function() { abrirCrearAcceso(this.getAttribute('data-nombre')); };
   });
-  document.querySelectorAll('[class2="revocar-acceso"]').forEach(function(btn) {
+  document.querySelectorAll('[data-type="revocar-acceso"]').forEach(function(btn) {
     btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
   });
 
@@ -885,19 +885,19 @@ async function renderUsuarios() {
       '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">Usuario: ' + usuarioLabel + '</div></div>' +
       '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span>' +
       (p.activo===false ? '<span class="badge badge-late">Inactivo</span>' : '') +
-      '<button class="btn btn-sm" data-pid="' + p.id + '" data-pnombre="' + p.nombre.replace(/'/g,'').replace(/"/g,'') + '" class2="btn-reset-pass">Reset pass</button>' +
+      '<button class="btn btn-sm" data-pid="' + p.id + '" data-pnombre="' + p.nombre.replace(/'/g,'').replace(/"/g,'') + '" data-type="btn-reset-pass">Reset pass</button>' +
       (p.rol !== 'empresa'
-        ? '<button class="btn btn-sm" style="color:' + (p.activo!==false?'var(--red)':'var(--green)') + ';border-color:' + (p.activo!==false?'var(--red-border)':'var(--green-border)') + '" data-pid="' + p.id + '" data-activo="' + (p.activo!==false?'true':'false') + '" class2="btn-toggle-user">' + (p.activo!==false?'Desactivar':'Activar') + '</button>'
+        ? '<button class="btn btn-sm" style="color:' + (p.activo!==false?'var(--red)':'var(--green)') + ';border-color:' + (p.activo!==false?'var(--red-border)':'var(--green-border)') + '" data-pid="' + p.id + '" data-activo="' + (p.activo!==false?'true':'false') + '" data-type="btn-toggle-user">' + (p.activo!==false?'Desactivar':'Activar') + '</button>'
         : ''
       ) +
       '</div>';
     }).join('') + '</div>';
 
   // Attach events after DOM update
-  document.querySelectorAll('[class2="btn-reset-pass"]').forEach(function(btn) {
+  document.querySelectorAll('[data-type="btn-reset-pass"]').forEach(function(btn) {
     btn.onclick = function() { abrirResetPass(this.getAttribute('data-pid'), this.getAttribute('data-pnombre')); };
   });
-  document.querySelectorAll('[class2="btn-toggle-user"]').forEach(function(btn) {
+  document.querySelectorAll('[data-type="btn-toggle-user"]').forEach(function(btn) {
     btn.onclick = async function() {
       const pid = this.getAttribute('data-pid');
       const activo = this.getAttribute('data-activo') === 'true';
