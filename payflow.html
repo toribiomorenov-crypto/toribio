@@ -519,6 +519,17 @@ async function renderDashboard() {
   const enPoderIntermediario = totalRecibidoClientes - totalEnviadoEmpresa;
   const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
 
+  // Saldo Matute Vencido: pagos confirmados hace más de 24hs que aún no fueron enviados
+  const ahora = Date.now();
+  const saldoMatuteVencido = pagos
+    .filter(p => p.estado === 'confirmado')
+    .filter(p => (ahora - new Date(p.created_at).getTime()) > 24 * 3600000)
+    .filter(p => {
+      // Verificar que no haya un envio que cubra este pago
+      return !envios.some(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id) && new Date(e.created_at) >= new Date(p.created_at));
+    })
+    .reduce((s,p) => s + Number(p.monto), 0);
+
   // Calcular promedio: para cada pago confirmado, buscar el primer envio posterior del cliente
   let tiempos = [];
   pagos.filter(p => p.estado === 'confirmado').forEach(p => {
@@ -542,7 +553,7 @@ async function renderDashboard() {
     (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aun no fueron enviados a la empresa.</div></div>' : '') +
     '<div class="metrics" style="grid-template-columns:repeat(4,1fr);">' +
     '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido - enviado</div></div>' +
-    '<div class="metric"><div class="metric-label">Total recibido de clientes</div><div class="metric-value">USD ' + fmt(totalRecibidoClientes) + '</div><div class="metric-sub">confirmado por intermediario</div></div>' +
+    '<div class="metric"><div class="metric-label">Saldo Matute Vencido</div><div class="metric-value ' + (saldoMatuteVencido > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoMatuteVencido) + '</div><div class="metric-sub">mas de 24hs sin enviar</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
     '</div>' +
@@ -1054,9 +1065,7 @@ async function renderIntEnviar() {
     '<div class="form-group"><label class="form-label">Monto total enviado</label><input class="form-input" type="number" id="env-monto" placeholder="0.00"/></div>' +
     '<div class="form-group"><label class="form-label">Medio</label><select class="form-select" id="env-medio"><option value="usdt">USDT</option><option value="transferencia">Transferencia bancaria</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></div>' +
     '<div class="form-group"><label class="form-label">Referencia / Hash (opcional)</label><input class="form-input" id="env-ref" placeholder="Hash de transaccion, numero de referencia..."/></div>' +
-    '<div style="margin:16px 0 8px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label class="form-label" style="margin:0">Composicion del pago (por cliente)</label><button class="btn btn-sm" onclick="agregarLineaCliente()">+ Agregar cliente</button></div>' +
-    '<div id="lineas-clientes"></div>' +
-    '<div id="env-total-check" style="font-size:12px;color:var(--text3);margin-top:8px;font-family:\'DM Mono\',monospace"></div></div>' +
+        '<div class="form-group"><label class="form-label">Observaciones (opcional)</label><input class="form-input" id="env-obs" placeholder="Referencia, aclaracion, etc."/></div>' +
     '<div class="form-group"><label class="form-label">Comprobante de transferencia (opcional)</label>' +
     '<div class="upload-zone" id="env-upload-zone"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF - max 5MB</div>' +
     '<input type="file" id="env-file" style="display:none" accept="image/*,.pdf"/></div>' +
@@ -1065,7 +1074,6 @@ async function renderIntEnviar() {
     '<button class="btn btn-primary" onclick="registrarEnvio()">Registrar envio</button>' +
     '</div></div>';
 
-  agregarLineaCliente();
 
   // File upload zone
   setTimeout(function() {
@@ -1154,23 +1162,6 @@ async function registrarEnvio() {
   const ref = document.getElementById('env-ref').value;
   if (!monto) { alert('Ingresa el monto total.'); return; }
 
-  const lineas = [];
-  document.querySelectorAll('[id^="linea-"][id$="-monto"]').forEach(el => {
-    const lineId = el.id.replace('-monto','');
-    const cliId = document.getElementById(lineId + '-cli')?.value;
-    const lineaMonto = parseFloat(el.value)||0;
-    const nota = document.getElementById(lineId + '-nota')?.value || '';
-    if (cliId && lineaMonto > 0) lineas.push({ cliente_profile_id: cliId, monto: lineaMonto, nota });
-  });
-
-  if (lineas.length === 0) { alert('Agrega al menos un cliente con monto.'); return; }
-
-  const sumaLineas = lineas.reduce((s,l) => s + l.monto, 0);
-  if (Math.abs(monto - sumaLineas) > 0.01) {
-    alert('El monto total (USD ' + fmt(monto) + ') no coincide con la suma de clientes (USD ' + fmt(sumaLineas) + '). Corregilo antes de continuar.');
-    return;
-  }
-
   // Verificar que el monto no supere el saldo disponible
   const { data: pagRes2 } = await db.from('pagos_cliente').select('monto').eq('estado','confirmado');
   const { data: envRes2 } = await db.from('envios_intermediario').select('monto_total');
@@ -1197,10 +1188,9 @@ async function registrarEnvio() {
     }
   }
 
-  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref, comprobante_url }).select().single();
+  const obs = document.getElementById('env-obs')?.value || '';
+  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref, notas: obs, comprobante_url }).select().single();
   if (error) { alert('Error al registrar.'); return; }
-
-  await db.from('detalle_envio').insert(lineas.map(l => ({ envio_id: envio.id, cliente_profile_id: l.cliente_profile_id, monto: l.monto, nota: l.nota })));
 
   const msg = document.getElementById('env-msg');
   msg.textContent = 'Envio registrado correctamente. La empresa lo vera reflejado.';
@@ -1209,15 +1199,37 @@ async function registrarEnvio() {
 }
 
 // ── INTERMEDIARIO: HISTORIAL ──
-async function renderIntHistorial() {
+async function renderIntHistorial(desde, hasta) {
+  const now = new Date();
+  const primerDia = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const ultimoDia = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59).toISOString();
+  const desdeVal = desde || primerDia;
+  const hastaVal = hasta || ultimoDia;
+
   const [pagRes, envRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
-    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles(nombre)').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
+    db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
   ]);
   const pagos = pagRes.data || [];
   const envios = envRes.data || [];
+  const totalRecibido = pagos.filter(p=>p.estado==='confirmado').reduce((s,p)=>s+Number(p.monto),0);
+  const totalEnviado = envios.reduce((s,e)=>s+Number(e.monto_total),0);
   const c = document.getElementById('main-content');
+  const desdeInput = desdeVal.split('T')[0];
+  const hastaInput = hastaVal.split('T')[0];
   c.innerHTML =
+    '<div class="card" style="margin-bottom:16px"><div class="form-pad" style="padding:12px 18px">' +
+    '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+    '<label class="form-label" style="margin:0;white-space:nowrap">Periodo:</label>' +
+    '<input class="form-input" type="date" id="hist-desde" value="' + desdeInput + '" style="width:140px"/>' +
+    '<span style="color:var(--text3);font-size:13px">hasta</span>' +
+    '<input class="form-input" type="date" id="hist-hasta" value="' + hastaInput + '" style="width:140px"/>' +
+    '<button class="btn btn-primary btn-sm" id="btn-hist-filter">Filtrar</button>' +
+    '</div></div></div>' +
+    '<div class="metrics" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">' +
+    '<div class="metric"><div class="metric-label">Total enviado a empresa</div><div class="metric-value">USD ' + fmt(totalEnviado) + '</div><div class="metric-sub">en el periodo</div></div>' +
+    '<div class="metric"><div class="metric-label">Total recibido de clientes</div><div class="metric-value">USD ' + fmt(totalRecibido) + '</div><div class="metric-sub">confirmado en el periodo</div></div>' +
+    '</div>' +
     '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios a la empresa</div></div>' +
     (envios.length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
       envios.map(e => {
