@@ -518,15 +518,18 @@ async function renderDashboard() {
   const enPoderIntermediario = totalRecibidoClientes - totalEnviadoEmpresa;
   const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
 
-  // Calcular promedio de dias desde que cliente informa hasta que intermediario envia
-  // Para cada envio, buscamos pagos confirmados anteriores al envio
+  // Calcular promedio: para cada pago confirmado, buscar el primer envio posterior del cliente
   let tiempos = [];
-  envios.forEach(e => {
-    const fechaEnvio = new Date(e.created_at);
-    pagos.filter(p => p.estado === 'confirmado' && new Date(p.created_at) <= fechaEnvio).forEach(p => {
-      const dias = (fechaEnvio - new Date(p.created_at)) / (1000 * 60 * 60 * 24);
-      tiempos.push(dias);
-    });
+  pagos.filter(p => p.estado === 'confirmado').forEach(p => {
+    const fechaPago = new Date(p.created_at);
+    const primerEnvio = envios
+      .filter(e => new Date(e.created_at) >= fechaPago)
+      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
+      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
+    if (primerEnvio) {
+      const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
+      tiempos.push(horas / 24);
+    }
   });
   const promedioDias = tiempos.length > 0 ? (tiempos.reduce((s,t) => s+t, 0) / tiempos.length) : null;
   const promedioHoras = promedioDias !== null ? (promedioDias * 24) : null;
@@ -699,9 +702,19 @@ function calcularDemoraEnvio(envio, pagos) {
   const fechaEnvio = new Date(envio.created_at);
   const det = envio.detalle_envio || [];
   const clienteIds = new Set(det.map(d => d.cliente_profile_id));
-  const pagosRel = pagos.filter(p => clienteIds.has(p.cliente_profile_id) && new Date(p.created_at) <= fechaEnvio && p.estado === 'confirmado');
-  if (!pagosRel.length) return '';
-  const avgHoras = pagosRel.reduce((s,p) => s + (fechaEnvio - new Date(p.created_at)) / 3600000, 0) / pagosRel.length;
+  // For each client in this envio, find their MOST RECENT pago before this envio
+  let tiempos = [];
+  clienteIds.forEach(function(cid) {
+    const pagosMasRecientes = pagos
+      .filter(p => p.cliente_profile_id === cid && p.estado === 'confirmado' && new Date(p.created_at) <= fechaEnvio)
+      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+    if (pagosMasRecientes.length > 0) {
+      const horas = (fechaEnvio - new Date(pagosMasRecientes[0].created_at)) / 3600000;
+      tiempos.push(horas);
+    }
+  });
+  if (!tiempos.length) return '';
+  const avgHoras = tiempos.reduce((s,h) => s+h, 0) / tiempos.length;
   const label = avgHoras < 24 ? avgHoras.toFixed(1).replace('.',',') + 'hs' : (avgHoras/24).toFixed(1).replace('.',',') + 'd';
   const ok = avgHoras <= 24;
   return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:DM Mono,monospace;white-space:nowrap;margin-right:4px">' + label + (ok?' ok':' tardio') + '</span>';
