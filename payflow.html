@@ -189,6 +189,27 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
+<!-- ===== CAMBIO OBLIGATORIO DE CONTRASENA ===== -->
+<div id="change-pass-screen" style="display:none;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg);">
+  <div class="login-card">
+    <div class="login-logo">PayFlow</div>
+    <div class="login-sub">cambio de contraseña requerido</div>
+    <div class="alert alert-info" style="margin-bottom:20px;font-size:13px;">
+      <span>Por seguridad, debes establecer una nueva contraseña antes de continuar.</span>
+    </div>
+    <div class="login-error" id="change-pass-error"></div>
+    <div class="form-group">
+      <label class="form-label">Nueva contraseña</label>
+      <input class="form-input" type="password" id="new-pass-1" placeholder="min. 6 caracteres"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirmar contraseña</label>
+      <input class="form-input" type="password" id="new-pass-2" placeholder="repetir contraseña"/>
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;" onclick="cambiarPassObligatorio()">Guardar y continuar</button>
+  </div>
+</div>
+
 <!-- ===== APP ===== -->
 <div id="app-screen">
 
@@ -271,14 +292,14 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   <div class="modal">
     <div class="modal-title">Resetear contraseña</div>
     <div class="login-error" id="reset-error"></div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Ingresa la nueva contraseña para <strong id="reset-nombre-label"></strong></p>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Ingresa una contraseña temporal para <strong id="reset-nombre-label"></strong>. El usuario deberá cambiarla al ingresar.</p>
     <div class="form-group">
-      <label class="form-label">Nueva contraseña</label>
+      <label class="form-label">Contraseña temporal</label>
       <input class="form-input" type="text" id="reset-pass" placeholder="min. 6 caracteres"/>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrarModal('modal-reset-pass')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarResetPass()">Guardar contraseña</button>
+      <button class="btn btn-primary" id="btn-confirmar-reset">Guardar y notificar</button>
     </div>
   </div>
 </div>
@@ -392,6 +413,13 @@ async function initApp(user) {
     const errEl = document.getElementById('login-error');
     showErr(errEl, 'Tu usuario esta desactivado. Contacta a la empresa.');
     document.getElementById('login-screen').style.display = 'flex';
+    return;
+  }
+  // Force password change if flagged
+  if (currentProfile.force_password_change === true) {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app-screen').style.display = 'none';
+    document.getElementById('change-pass-screen').style.display = 'flex';
     return;
   }
   document.getElementById('login-screen').style.display = 'none';
@@ -1267,16 +1295,20 @@ function abrirResetPass(profileId, nombre) {
   document.getElementById('reset-pass').value = '';
   document.getElementById('reset-error').style.display = 'none';
   abrirModal('modal-reset-pass');
+  // Attach click directly each time modal opens
+  const btn = document.getElementById('btn-confirmar-reset');
+  if (btn) {
+    btn.onclick = confirmarResetPass;
+  }
 }
 
 async function confirmarResetPass() {
   const pass = document.getElementById('reset-pass').value;
   const errEl = document.getElementById('reset-error');
+  const btn = document.getElementById('btn-confirmar-reset');
   errEl.style.display = 'none';
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
   if (!resetProfileId) { showErr(errEl, 'Error: no se encontro el usuario.'); return; }
-
-  const btn = document.querySelector('[onclick="confirmarResetPass()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
   try {
@@ -1295,13 +1327,47 @@ async function confirmarResetPass() {
     const result = await res.json();
     if (result.error) throw new Error(result.error);
 
+    // Mark user as needing to change password
+    await db.from('profiles').update({ force_password_change: true }).eq('id', resetProfileId);
+
     cerrarModal('modal-reset-pass');
-    alert('Contrasena actualizada correctamente.');
+    alert('Contrasena temporal guardada. El usuario debera cambiarla al ingresar.\n\nContrasena temporal: ' + pass);
   } catch(e) {
-    showErr(errEl, 'Error: ' + e.message);
+    showErr(errEl, 'Error al resetear: ' + e.message);
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Guardar contrasena'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar y notificar'; }
   }
+}
+
+async function cambiarPassObligatorio() {
+  const pass1 = document.getElementById('new-pass-1').value;
+  const pass2 = document.getElementById('new-pass-2').value;
+  const errEl = document.getElementById('change-pass-error');
+  errEl.style.display = 'none';
+  if (pass1.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
+  if (pass1 !== pass2) { showErr(errEl, 'Las contrasenas no coinciden.'); return; }
+
+  const { data: sessionData } = await db.auth.getSession();
+  const token = sessionData?.session?.access_token;
+
+  const res = await fetch('https://lgrbdzutcoejdyymquku.supabase.co/functions/v1/reset-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ userId: currentUser.id, newPassword: pass1 })
+  });
+
+  const result = await res.json();
+  if (result.error) { showErr(errEl, 'Error: ' + result.error); return; }
+
+  // Clear force_password_change flag
+  await db.from('profiles').update({ force_password_change: false }).eq('id', currentUser.id);
+  currentProfile.force_password_change = false;
+
+  document.getElementById('change-pass-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+  buildSidebar(currentProfile.rol);
+  const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
+  loadView(defaultView);
 }
 
 // HELPERS
