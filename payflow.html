@@ -372,6 +372,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 
 <script>
 const SUPA_URL = 'https://lgrbdzutcoejdyymquku.supabase.co';
+const BACKEND_URL = 'https://payflow-backend-production-ef4f.up.railway.app';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncmJkenV0Y29lamR5eW1xdWt1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MDY5MDIsImV4cCI6MjA5MjI4MjkwMn0.6Vn9OuG8naHLhklt461ee3YzKuIpYji62lW_waY2QXI';
 const { createClient } = supabase;
 const db = createClient(SUPA_URL, SUPA_KEY);
@@ -1582,7 +1583,7 @@ async function confirmarResetPass() {
     const { data: sessionData } = await db.auth.getSession();
     const token = sessionData?.session?.access_token;
 
-    const res = await fetch('https://lgrbdzutcoejdyymquku.supabase.co/functions/v1/reset-password', {
+    const res = await fetch('https://payflow-backend-production-ef4f.up.railway.app/api/reset-password', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1617,7 +1618,7 @@ async function cambiarPassObligatorio() {
   const { data: sessionData } = await db.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch('https://lgrbdzutcoejdyymquku.supabase.co/functions/v1/reset-password', {
+  const res = await fetch('https://payflow-backend-production-ef4f.up.railway.app/api/reset-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({ userId: currentUser.id, newPassword: pass1 })
