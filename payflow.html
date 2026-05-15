@@ -1003,20 +1003,20 @@ async function revocarAcceso(profileId, nombre) {
 // ── EMPRESA: USUARIOS ──
 async function renderUsuarios() {
   const { data: profiles } = await db.from('profiles').select('*').order('created_at', { ascending: false });
+  const activos = (profiles||[]).filter(p => p.activo !== false);
   const c = document.getElementById('main-content');
   c.innerHTML =
     '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;"><button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Nuevo usuario</button></div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Usuarios del sistema</div></div>' +
-    (profiles||[]).map(p => {
+    activos.map(p => {
       const usuario = p.email.replace('@payflow.local','');
       const usuarioLabel = p.email.includes('@payflow.local') ? usuario : p.email;
       return '<div class="pago-row"><div class="pago-avatar">' + esc(p.nombre).substring(0,2).toUpperCase() + '</div>' +
       '<div class="pago-info"><div class="pago-name">' + esc(p.nombre) + '</div><div class="pago-sub">Usuario: ' + esc(usuarioLabel) + '</div></div>' +
       '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + esc(p.rol) + '</span>' +
-      (p.activo===false ? '<span class="badge badge-late">Inactivo</span>' : '') +
       '<button class="btn btn-sm" data-pid="' + esc(p.id) + '" data-pnombre="' + esc(p.nombre) + '" data-type="btn-reset-pass">Reset pass</button>' +
       (p.rol !== 'empresa'
-        ? '<button class="btn btn-sm" style="color:' + (p.activo!==false?'var(--red)':'var(--green)') + ';border-color:' + (p.activo!==false?'var(--red-border)':'var(--green-border)') + '" data-pid="' + p.id + '" data-activo="' + (p.activo!==false?'true':'false') + '" data-type="btn-toggle-user">' + (p.activo!==false?'Desactivar':'Activar') + '</button>'
+        ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-activo="true" data-type="btn-toggle-user">Desactivar</button>'
         : ''
       ) +
       '</div>';
