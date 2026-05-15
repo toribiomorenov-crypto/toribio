@@ -1020,7 +1020,20 @@ async function renderUsuarios() {
       const pid = this.getAttribute('data-pid');
       const activo = this.getAttribute('data-activo') === 'true';
       if (!confirm('Confirmas ' + (activo ? 'desactivar' : 'activar') + ' este usuario?')) return;
-      await db.from('profiles').update({ activo: !activo }).eq('id', pid);
+      try {
+        const { data: s } = await db.auth.getSession();
+        const token = s?.session?.access_token;
+        const res = await fetch(BACKEND_URL + '/api/toggle-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ userId: pid, activo: !activo })
+        });
+        const result = await res.json();
+        if (!res.ok) { alert('Error: ' + (result.error || 'No se pudo actualizar el usuario')); return; }
+      } catch(e) {
+        alert('Error de conexion al actualizar el usuario');
+        return;
+      }
       await renderUsuarios();
     };
   });
