@@ -942,6 +942,7 @@ async function importarClientes(input) {
       .map(r => ({ nombre: String(r[colNom]).trim(), codigo: colCod >= 0 ? String(r[colCod]||'').trim() : '' }))
       .filter(c => c.nombre.length > 1);
     if (!clientes.length) { alert('No se encontraron clientes en el archivo.'); return; }
+    if (!confirm('¿Confirmas importar ' + clientes.length + ' clientes? Los registros existentes con el mismo nombre serán sobreescritos.')) { input.value = ''; return; }
     const { error } = await db.from('clientes_importados').upsert(clientes, { onConflict: 'nombre' });
     if (error) { alert('Error al importar: ' + error.message); return; }
     alert(clientes.length + ' clientes importados correctamente.');
@@ -1396,6 +1397,7 @@ async function renderComisionEmpresa(year, month) {
       const notas = document.getElementById('com-notas').value;
       if (!monto || !fecha) { alert('Completa monto y fecha.'); return; }
       if (monto > saldoComision + 0.01) { alert('El monto supera el saldo pendiente (USD ' + fmtDec(saldoComision, 2) + ').'); return; }
+      if (!confirm('¿Confirmas registrar un pago de comisión de USD ' + fmtDec(monto, 2) + '? Esta acción no se puede deshacer.')) return;
       btnPagar.disabled = true; btnPagar.textContent = 'Guardando...';
       const { error } = await db.from('comision_pagos').insert({ monto, fecha_pago: fecha, notas });
       if (error) { alert('Error: ' + error.message); btnPagar.disabled = false; btnPagar.textContent = 'Registrar pago'; return; }
@@ -1660,6 +1662,7 @@ async function confirmarResetPass() {
   errEl.style.display = 'none';
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
   if (!resetProfileId) { showErr(errEl, 'Error: no se encontro el usuario.'); return; }
+  if (!confirm('¿Confirmas resetear la contraseña? El usuario deberá cambiarla en su próximo login.')) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
   try {
