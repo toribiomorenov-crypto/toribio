@@ -318,6 +318,7 @@ const db = createClient(SUPA_URL, SUPA_KEY);
 
 let currentUser = null;
 let currentProfile = null;
+let realtimeChannel = null;
 
 // AUTH
 async function doLogin() {
@@ -334,6 +335,7 @@ async function doLogin() {
 }
 
 async function doLogout() {
+  if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
   await db.auth.signOut();
   currentUser = null; currentProfile = null;
   document.getElementById('app-screen').style.display = 'none';
@@ -372,11 +374,60 @@ async function initApp(user) {
   buildSidebar(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  setupRealtime(currentProfile.rol);
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
   if (session && !currentUser) await initApp(session.user);
 });
+
+// ── Notificaciones en tiempo real (Supabase Realtime) ──
+function setupRealtime(rol) {
+  if (realtimeChannel) db.removeChannel(realtimeChannel);
+  if (rol === 'pagador') {
+    realtimeChannel = db.channel('payflow-pagador')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pagos_cliente' },
+        function(payload) {
+          showBrowserNotification(
+            '💸 Nuevo pago de cliente',
+            'USD ' + Number(payload.new.monto).toFixed(2) + ' — Pendiente de confirmacion'
+          );
+        })
+      .subscribe();
+  } else if (rol === 'empresa') {
+    realtimeChannel = db.channel('payflow-empresa')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'envios_intermediario' },
+        function(payload) {
+          showBrowserNotification(
+            '📤 Nuevo envio del intermediario',
+            'USD ' + Number(payload.new.monto_total).toFixed(2) + ' — Pendiente de confirmacion'
+          );
+        })
+      .subscribe();
+  }
+}
+
+function showBrowserNotification(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  new Notification(title, { body });
+}
+
+// Llama al backend para enviar email (fire-and-forget, errores silenciosos)
+async function notifyEmail(tipo, datos) {
+  try {
+    const { data: s } = await db.auth.getSession();
+    const token = s?.session?.access_token;
+    if (!token) return;
+    fetch(BACKEND_URL + '/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ tipo, ...datos })
+    });
+  } catch(e) { /* silent */ }
+}
 
 // SIDEBAR
 function buildSidebar(rol) {
@@ -581,7 +632,7 @@ async function renderControlIntermediario() {
         '</div>' +
         '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
         (e.comprobante_url ? '<a href="' + e.comprobante_url + '" target="_blank" class="btn btn-sm" style="text-decoration:none">Ver comprobante</a>' : '') +
-        '<button class="btn btn-primary btn-sm" data-envio-id="' + e.id + '" data-type="btn-confirmar-envio">Confirmar recepcion</button>' +
+        '<button class="btn btn-primary btn-sm" data-envio-id="' + e.id + '" data-monto="' + Number(e.monto_total) + '" data-type="btn-confirmar-envio">Confirmar recepcion</button>' +
         '<span style="font-size:11px;color:var(--blue);cursor:pointer;white-space:nowrap" data-toggle-id="penv-' + e.id + '" data-type="toggle-det">ver detalle</span>' +
         '</div>' +
         '<div id="penv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
@@ -650,6 +701,7 @@ async function renderControlIntermediario() {
   document.querySelectorAll('[data-type="btn-confirmar-envio"]').forEach(function(btn) {
     btn.addEventListener('click', async function() {
       const envioId = this.getAttribute('data-envio-id');
+      const envioMonto = this.getAttribute('data-monto');
       if (!confirm('Confirmas que recibiste este pago del intermediario?')) return;
       this.disabled = true;
       this.textContent = 'Confirmando...';
@@ -657,6 +709,7 @@ async function renderControlIntermediario() {
         .update({ confirmado: true, confirmado_at: new Date().toISOString() })
         .eq('id', envioId);
       if (error) { alert('Error: ' + error.message); this.disabled = false; this.textContent = 'Confirmar recepcion'; return; }
+      notifyEmail('envio_confirmado', { monto: envioMonto });
       await renderControlIntermediario();
     });
   });
@@ -1169,6 +1222,8 @@ async function registrarEnvio() {
     await db.from('detalle_envio').insert(lineas);
   }
 
+  notifyEmail('nuevo_envio', { monto });
+
   const msg = document.getElementById('env-msg');
   if (msg) { msg.textContent = 'Envio registrado correctamente. La empresa lo vera reflejado.'; msg.style.display = 'flex'; }
   setTimeout(() => loadView('int-historial'), 1500);
@@ -1242,11 +1297,13 @@ async function renderIntHistorial(desde, hasta) {
 }
 
 // ── EMPRESA: COMISION INTERMEDIARIO ──
-async function renderComisionEmpresa() {
+async function renderComisionEmpresa(year, month) {
   const now = new Date();
-  const mesLabel = now.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
-  const primerDia = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const ultimoDia = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59).toISOString();
+  if (year === undefined) year = now.getFullYear();
+  if (month === undefined) month = now.getMonth();
+  const mesLabel = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+  const primerDia = new Date(year, month, 1).toISOString();
+  const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
 
   const [pagRes, envRes, pagosComRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
@@ -1281,7 +1338,13 @@ async function renderComisionEmpresa() {
   const saldoComision = totalComision - totalPagado;
 
   const c = document.getElementById('main-content');
-  let html = '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+  const isMesActual = year === now.getFullYear() && month === now.getMonth();
+  let html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">' +
+    '<button class="btn btn-sm" id="btn-mes-prev">← Anterior</button>' +
+    '<span style="font-size:14px;font-weight:500;min-width:160px;text-align:center;text-transform:capitalize">' + mesLabel + '</span>' +
+    '<button class="btn btn-sm" id="btn-mes-next"' + (isMesActual ? ' disabled' : '') + '>Siguiente →</button>' +
+    '</div>';
+  html += '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision devengada</div><div class="metric-value">USD ' + fmtDec(totalComision, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Ya pagado</div><div class="metric-value ok">USD ' + fmtDec(totalPagado, 2) + '</div><div class="metric-sub">este mes</div></div>' +
     '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
@@ -1339,9 +1402,22 @@ async function renderComisionEmpresa() {
       const msg = document.getElementById('com-msg');
       msg.textContent = 'Pago de comision registrado correctamente.';
       msg.style.display = 'flex';
-      setTimeout(() => renderComisionEmpresa(), 1500);
+      setTimeout(() => renderComisionEmpresa(year, month), 1500);
     };
   }
+
+  const btnPrev = document.getElementById('btn-mes-prev');
+  const btnNext = document.getElementById('btn-mes-next');
+  if (btnPrev) btnPrev.onclick = function() {
+    let y = year, m = month - 1;
+    if (m < 0) { m = 11; y--; }
+    renderComisionEmpresa(y, m);
+  };
+  if (btnNext && !isMesActual) btnNext.onclick = function() {
+    let y = year, m = month + 1;
+    if (m > 11) { m = 0; y++; }
+    renderComisionEmpresa(y, m);
+  };
 }
 
 // ── CLIENTE: HOME ──
@@ -1365,11 +1441,13 @@ async function renderCliHome() {
 }
 
 // ── INTERMEDIARIO: COMISION ──
-async function renderIntComision() {
+async function renderIntComision(year, month) {
   const now = new Date();
-  const primerDia = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const ultimoDia = new Date(now.getFullYear(), now.getMonth()+1, 0, 23, 59, 59).toISOString();
-  const mesLabel = now.toLocaleString('es-AR', { month: 'long', year: 'numeric' });
+  if (year === undefined) year = now.getFullYear();
+  if (month === undefined) month = now.getMonth();
+  const primerDia = new Date(year, month, 1).toISOString();
+  const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+  const mesLabel = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
   const [pagRes, envRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
@@ -1405,8 +1483,14 @@ async function renderIntComision() {
   });
 
   const comisionTotal = totalCalifica * 0.0001;
+  const isMesActualInt = year === now.getFullYear() && month === now.getMonth();
   const c = document.getElementById('main-content');
   c.innerHTML =
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">' +
+    '<button class="btn btn-sm" id="btn-int-mes-prev">← Anterior</button>' +
+    '<span style="font-size:14px;font-weight:500;min-width:160px;text-align:center;text-transform:capitalize">' + mesLabel + '</span>' +
+    '<button class="btn btn-sm" id="btn-int-mes-next"' + (isMesActualInt ? ' disabled' : '') + '>Siguiente →</button>' +
+    '</div>' +
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">enviado en menos de 24hs</div></div>' +
@@ -1451,6 +1535,19 @@ async function renderIntComision() {
       XLSX.writeFile(wb, 'comision_' + mesLabel.replace(' ','_') + '.xlsx');
     };
   }
+
+  const btnIntPrev = document.getElementById('btn-int-mes-prev');
+  const btnIntNext = document.getElementById('btn-int-mes-next');
+  if (btnIntPrev) btnIntPrev.onclick = function() {
+    let y = year, m = month - 1;
+    if (m < 0) { m = 11; y--; }
+    renderIntComision(y, m);
+  };
+  if (btnIntNext && !isMesActualInt) btnIntNext.onclick = function() {
+    let y = year, m = month + 1;
+    if (m > 11) { m = 0; y++; }
+    renderIntComision(y, m);
+  };
 }
 
 // ── CLIENTE: INFORMAR PAGO ──
@@ -1500,6 +1597,8 @@ async function informarPago() {
 
   const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, comprobante_url, estado: 'pendiente' });
   if (error) { alert('Error al registrar: ' + error.message); if (btn) { btn.disabled = false; btn.textContent = 'Enviar informe de pago'; } return; }
+
+  notifyEmail('nuevo_pago', { monto, clienteNombre: currentProfile.nombre });
 
   const msg = document.getElementById('cp-msg');
   msg.textContent = 'Pago informado correctamente. El intermediario lo confirmara a la brevedad.';
