@@ -277,6 +277,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">Email real (para notificaciones)</label>
+      <input class="form-input" type="email" id="nu-email-notif" placeholder="ej: juan@empresa.com (opcional)"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Si se completa, recibirá notificaciones por email.</div>
+    </div>
+    <div class="form-group">
       <label class="form-label">Rol</label>
       <select class="form-select" id="nu-rol">
         <option value="cliente">Cliente</option>
@@ -1614,6 +1619,7 @@ async function crearUsuario() {
   const usuario = document.getElementById('nu-email').value.trim().toLowerCase().replace(/[^a-z0-9._-]/g,'');
   const pass = document.getElementById('nu-pass').value;
   const rol = document.getElementById('nu-rol').value;
+  const emailNotif = document.getElementById('nu-email-notif').value.trim().toLowerCase();
   const errEl = document.getElementById('modal-error');
   const btnCrear = document.querySelector('#modal-crear-usuario .btn-primary');
   errEl.style.display = 'none';
@@ -1627,11 +1633,12 @@ async function crearUsuario() {
     const res = await fetch(BACKEND_URL + '/api/create-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ nombre, email, password: pass, rol })
+      body: JSON.stringify({ nombre, email, password: pass, rol, emailNotif })
     });
     const result = await res.json();
     if (result.error) throw new Error(result.error);
     cerrarModal('modal-crear-usuario');
+    document.getElementById('nu-email-notif').value = '';
     alert('Usuario creado correctamente.\n\nNombre: ' + nombre + '\nUsuario: ' + usuario + '\nContrasena: ' + pass + '\n\nGuarda estos datos para compartirlos con el usuario.');
     await renderUsuarios();
   } catch(e) {
