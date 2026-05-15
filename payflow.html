@@ -349,52 +349,55 @@ async function doLogout() {
 }
 
 async function initApp(user) {
-  if (currentUser) return; // guard doble init
-  // NO seteamos currentUser hasta que todo sea exitoso
-  const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-  let finalProfile;
-  if (error || !profile) {
-    const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
-    if (ie || !newProfile) {
-      showErr(document.getElementById('login-error'), 'Error al cargar perfil.');
-      await db.auth.signOut(); // limpiar sesion para no dejar estado roto
+  if (currentUser) return; // guard: bloquea llamadas concurrentes
+  currentUser = user;      // mutex: se setea temprano para evitar race condition
+  try {
+    const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
+    let finalProfile;
+    if (error || !profile) {
+      const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
+      if (ie || !newProfile) {
+        currentUser = null; // limpiar mutex en error
+        showErr(document.getElementById('login-error'), 'Error al cargar perfil.');
+        await db.auth.signOut();
+        return;
+      }
+      finalProfile = newProfile;
+    } else {
+      finalProfile = profile;
+    }
+    if (finalProfile.activo === false) {
+      currentUser = null; currentProfile = null; // limpiar mutex
+      await db.auth.signOut();
+      showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
+      document.getElementById('login-screen').style.display = 'flex';
       return;
     }
-    finalProfile = newProfile;
-  } else {
-    finalProfile = profile;
-  }
-  if (finalProfile.activo === false) {
-    await db.auth.signOut();
-    showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
-    document.getElementById('login-screen').style.display = 'flex';
-    return;
-  }
-  // Force password change if flagged
-  if (finalProfile.force_password_change === true) {
-    currentUser = user;
     currentProfile = finalProfile;
+    if (finalProfile.force_password_change === true) {
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('app-screen').style.display = 'none';
+      document.getElementById('change-pass-screen').style.display = 'flex';
+      return;
+    }
+    // Todo OK — mostrar app
     document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'none';
-    document.getElementById('change-pass-screen').style.display = 'flex';
-    return;
+    document.getElementById('app-screen').style.display = 'block';
+    document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
+    document.getElementById('sidebar-rol').textContent = currentProfile.rol;
+    const mUN = document.getElementById('mobile-user-nombre');
+    if (mUN) mUN.textContent = currentProfile.nombre;
+    buildSidebar(currentProfile.rol);
+    const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
+    loadView(defaultView);
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+    setupRealtime(currentProfile.rol);
+  } catch(e) {
+    currentUser = null; currentProfile = null; // limpiar mutex en excepcion
+    throw e; // re-throw para que onAuthStateChange lo maneje
   }
-  // Todo OK — recien ahora seteamos currentUser
-  currentUser = user;
-  currentProfile = finalProfile;
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'block';
-  document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
-  document.getElementById('sidebar-rol').textContent = currentProfile.rol;
-  const mUN = document.getElementById('mobile-user-nombre');
-  if (mUN) mUN.textContent = currentProfile.nombre;
-  buildSidebar(currentProfile.rol);
-  const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
-  loadView(defaultView);
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-  setupRealtime(currentProfile.rol);
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
