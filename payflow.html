@@ -387,7 +387,22 @@ async function initApp(user) {
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
-  if (session && !currentUser) await initApp(session.user);
+  if (event === 'SIGNED_OUT') {
+    currentUser = null; currentProfile = null;
+    if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
+    document.getElementById('app-screen').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    return;
+  }
+  if (session && !currentUser) {
+    try {
+      await initApp(session.user);
+    } catch(e) {
+      // Sesion invalida o error critico — limpiar y volver al login
+      currentUser = null; currentProfile = null;
+      await db.auth.signOut();
+    }
+  }
 });
 
 // ── Notificaciones en tiempo real (Supabase Realtime) ──
