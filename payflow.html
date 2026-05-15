@@ -350,27 +350,38 @@ async function doLogout() {
 
 async function initApp(user) {
   if (currentUser) return; // guard doble init
-  currentUser = user;
+  // NO seteamos currentUser hasta que todo sea exitoso
   const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
+  let finalProfile;
   if (error || !profile) {
     const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
-    if (ie || !newProfile) { showErr(document.getElementById('login-error'), 'Error al cargar perfil.'); return; }
-    currentProfile = newProfile;
-  } else { currentProfile = profile; }
-  if (currentProfile.activo === false) {
+    if (ie || !newProfile) {
+      showErr(document.getElementById('login-error'), 'Error al cargar perfil.');
+      await db.auth.signOut(); // limpiar sesion para no dejar estado roto
+      return;
+    }
+    finalProfile = newProfile;
+  } else {
+    finalProfile = profile;
+  }
+  if (finalProfile.activo === false) {
     await db.auth.signOut();
-    const errEl = document.getElementById('login-error');
-    showErr(errEl, 'Tu usuario esta desactivado. Contacta a la empresa.');
+    showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
     document.getElementById('login-screen').style.display = 'flex';
     return;
   }
   // Force password change if flagged
-  if (currentProfile.force_password_change === true) {
+  if (finalProfile.force_password_change === true) {
+    currentUser = user;
+    currentProfile = finalProfile;
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app-screen').style.display = 'none';
     document.getElementById('change-pass-screen').style.display = 'flex';
     return;
   }
+  // Todo OK — recien ahora seteamos currentUser
+  currentUser = user;
+  currentProfile = finalProfile;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
