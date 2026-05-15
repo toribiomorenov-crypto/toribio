@@ -308,67 +308,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
-<!-- ===== MODAL: Reportar pago (cliente) ===== -->
-<div class="modal-overlay" id="modal-reportar-pago">
-  <div class="modal">
-    <div class="modal-title">Reportar pago al pagador</div>
-    <div class="login-error" id="rp-error"></div>
-    <div class="form-group">
-      <label class="form-label">Orden</label>
-      <select class="form-select" id="rp-orden"></select>
-    </div>
-    <div class="grid-2">
-      <div class="form-group">
-        <label class="form-label">Monto pagado</label>
-        <input class="form-input" type="number" id="rp-monto" placeholder="0.00"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Fecha</label>
-        <input class="form-input" type="date" id="rp-fecha"/>
-      </div>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Forma de pago</label>
-      <select class="form-select" id="rp-forma">
-        <option value="efectivo">Efectivo</option>
-        <option value="usdt">USDT</option>
-        <option value="cheque">Cheque</option>
-        <option value="transferencia">Transferencia</option>
-        <option value="otro">Otro</option>
-      </select>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" onclick="cerrarModal('modal-reportar-pago')">Cancelar</button>
-      <button class="btn btn-primary" onclick="reportarPago()">Enviar reporte</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== MODAL: Confirmar pago (pagador) ===== -->
-<div class="modal-overlay" id="modal-confirmar-pago">
-  <div class="modal">
-    <div class="modal-title">Confirmar recepción del pago</div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Confirmás que recibiste este pago físicamente del cliente.</p>
-    <div id="confirmar-detalle" style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px;margin-bottom:20px;font-size:13px;"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="cerrarModal('modal-confirmar-pago')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarPago()">Confirmar recepción</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== MODAL: Liberar orden (empresa) ===== -->
-<div class="modal-overlay" id="modal-liberar-orden">
-  <div class="modal">
-    <div class="modal-title">Liberar orden</div>
-    <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">El pago está confirmado por el pagador. ¿Confirmás la liberación de esta orden?</p>
-    <div id="liberar-detalle" style="background:var(--surface2);border-radius:var(--radius-sm);padding:14px;margin-bottom:20px;font-size:13px;"></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="cerrarModal('modal-liberar-orden')">Cancelar</button>
-      <button class="btn btn-primary" onclick="liberarOrden()">Liberar orden</button>
-    </div>
-  </div>
-</div>
 
 <script>
 const SUPA_URL = 'https://lgrbdzutcoejdyymquku.supabase.co';
@@ -379,10 +318,6 @@ const db = createClient(SUPA_URL, SUPA_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-let cuentasCache = null;
-let activeModalData = {};
-
-// SHEETS
 
 // AUTH
 async function doLogin() {
@@ -400,12 +335,13 @@ async function doLogin() {
 
 async function doLogout() {
   await db.auth.signOut();
-  currentUser = null; currentProfile = null; cuentasCache = null;
+  currentUser = null; currentProfile = null;
   document.getElementById('app-screen').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
 }
 
 async function initApp(user) {
+  if (currentUser) return; // guard doble init
   currentUser = user;
   const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
   if (error || !profile) {
@@ -431,6 +367,8 @@ async function initApp(user) {
   document.getElementById('app-screen').style.display = 'block';
   document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
   document.getElementById('sidebar-rol').textContent = currentProfile.rol;
+  const mUN = document.getElementById('mobile-user-nombre');
+  if (mUN) mUN.textContent = currentProfile.nombre;
   buildSidebar(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
@@ -464,8 +402,23 @@ function buildSidebar(rol) {
     ],
   };
   const items = menus[rol] || [];
-  nav.innerHTML = '<div class="nav-label">' + rol + '</div>' +
-    items.map(i => '<div class="nav-item" id="nav-' + i.id + '" onclick="loadView(\'' + i.id + '\')"><span class="nav-dot"></span>' + i.label + '</div>').join('');
+  const mobileIcons = {
+    'dashboard':'⊞','control-intermediario':'📊','pagos-clientes':'💳',
+    'comision-empresa':'💰','clientes':'👥','usuarios':'⚙️',
+    'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰',
+    'cli-home':'🏠','cli-pagar':'💸'
+  };
+  nav.innerHTML = '<div class="nav-label">' + esc(rol) + '</div>' +
+    items.map(i => '<div class="nav-item" id="nav-' + esc(i.id) + '" onclick="loadView(\'' + esc(i.id) + '\')"><span class="nav-dot"></span>' + esc(i.label) + '</div>').join('');
+  const mobileNav = document.getElementById('mobile-nav-items');
+  if (mobileNav) {
+    mobileNav.innerHTML = items.slice(0,5).map(i =>
+      '<div class="mobile-nav-item" id="mnav-' + esc(i.id) + '" onclick="loadView(\'' + esc(i.id) + '\')">' +
+      '<span class="mobile-nav-icon">' + (mobileIcons[i.id]||'·') + '</span>' +
+      '<span>' + esc(i.label.split(' ')[0]) + '</span>' +
+      '</div>'
+    ).join('');
+  }
 }
 
 function setActiveNav(id) {
@@ -488,6 +441,7 @@ async function loadView(id) {
     'dashboard': ['Dashboard', 'Vision general del negocio'],
     'control-intermediario': ['Control del intermediario', 'Seguimiento de fondos en poder del intermediario'],
     'pagos-clientes': ['Pagos de clientes', 'Historial de pagos informados por clientes'],
+    'comision-empresa': ['Comision del intermediario', 'Calculo y pago de comision mensual'],
     'clientes': ['Clientes', 'Alta y gestion de clientes'],
     'usuarios': ['Usuarios', 'Gestion de accesos'],
     'int-home': ['Pagos recibidos', 'Registra cobros de clientes'],
@@ -565,7 +519,7 @@ async function renderDashboard() {
     (pagos.slice(0,5).length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
       pagos.slice(0,5).map(p =>
         '<div class="pago-row" style="padding:10px 18px">' +
-        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
         '</div>'
@@ -576,7 +530,7 @@ async function renderDashboard() {
     (envios.slice(0,5).length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
       envios.slice(0,5).map(e =>
         '<div class="pago-row" style="padding:10px 18px">' +
-        '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia ? ' - ' + e.referencia : '') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' - ' + (e.detalle_envio||[]).length + ' cliente(s)</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(e.medio) + (e.referencia ? ' - ' + esc(e.referencia) : '') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' - ' + (e.detalle_envio||[]).length + ' cliente(s)</div></div>' +
         '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
         '</div>'
       ).join('')
@@ -622,7 +576,7 @@ async function renderControlIntermediario() {
         '<div style="border-bottom:0.5px solid var(--border)">' +
         '<div class="pago-row">' +
         '<div class="pago-info">' +
-        '<div class="pago-name">' + e.medio + (e.referencia ? ' — ' + e.referencia : '') + '</div>' +
+        '<div class="pago-name">' + esc(e.medio) + (e.referencia ? ' — ' + esc(e.referencia) : '') + '</div>' +
         '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' · ' + det.length + ' cliente(s)</div>' +
         '</div>' +
         '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
@@ -632,7 +586,7 @@ async function renderControlIntermediario() {
         '</div>' +
         '<div id="penv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
         '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead><tbody>' +
-        det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') +
+        det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + esc(d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + esc(d.nota||'') + '</td></tr>').join('') +
         '</tbody></table></div></div>';
     });
     html += '</div>';
@@ -644,38 +598,40 @@ async function renderControlIntermediario() {
     html += '<div class="empty-state">Sin envios confirmados aun.</div>';
   } else {
     enviosConfirmados.forEach(function(e) {
-    const det = e.detalle_envio || [];
-    const demora = calcularDemoraEnvioTexto(e, pagos);
-    html +=
-      '<div style="display:grid;grid-template-columns:1fr auto;gap:0;border-bottom:0.5px solid var(--border)">' +
-      '<div style="padding:14px 18px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
-      '<span style="font-size:14px;font-weight:500;font-family:DM Mono,monospace">USD ' + fmt(e.monto_total) + '</span>' +
-      '<span class="badge badge-released" style="font-size:10px">Confirmado</span>' +
-      (demora.label ? '<span style="font-size:11px;font-family:DM Mono,monospace;color:' + demora.color + '">' + demora.label + '</span>' : '') +
-      '</div>' +
-      '<div style="font-size:12px;color:var(--text3)">' + new Date(e.created_at).toLocaleDateString('es-AR') + ' · ' + e.medio + (e.referencia ? ' · ' + e.referencia : '') + ' · ' + det.length + ' cliente(s)</div>' +
-      '</div>' +
-      '<div style="padding:14px 18px;display:flex;align-items:center">' +
-      '<button style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;white-space:nowrap" data-type="toggle-cenv" data-id="' + e.id + '">ver detalle</button>' +
-      '</div>' +
-      '</div>' +
-      '<div id="cenv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
-      '<thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead>' +
-      '<tbody>' + det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + (d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + (d.nota||'') + '</td></tr>').join('') + '</tbody>' +
-      '</table></div>';
-  });
+      const det = e.detalle_envio || [];
+      const demora = calcularDemoraEnvioTexto(e, pagos);
+      html +=
+        '<div style="display:grid;grid-template-columns:1fr auto;gap:0;border-bottom:0.5px solid var(--border)">' +
+        '<div style="padding:14px 18px">' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
+        '<span style="font-size:14px;font-weight:500;font-family:DM Mono,monospace">USD ' + fmt(e.monto_total) + '</span>' +
+        '<span class="badge badge-released" style="font-size:10px">Confirmado</span>' +
+        (demora.label ? '<span style="font-size:11px;font-family:DM Mono,monospace;color:' + demora.color + '">' + demora.label + '</span>' : '') +
+        '</div>' +
+        '<div style="font-size:12px;color:var(--text3)">' + new Date(e.created_at).toLocaleDateString('es-AR') + ' · ' + esc(e.medio) + (e.referencia ? ' · ' + esc(e.referencia) : '') + ' · ' + det.length + ' cliente(s)</div>' +
+        '</div>' +
+        '<div style="padding:14px 18px;display:flex;align-items:center">' +
+        '<button style="font-size:11px;color:var(--blue);background:none;border:none;cursor:pointer;white-space:nowrap" data-type="toggle-cenv" data-id="' + esc(e.id) + '">ver detalle</button>' +
+        '</div>' +
+        '</div>' +
+        '<div id="cenv-' + esc(e.id) + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
+        '<table style="width:100%;font-size:12px;border-collapse:collapse">' +
+        '<thead><tr style="color:var(--text3)"><th style="padding:6px 4px;text-align:left">Cliente</th><th style="text-align:right">Monto USD</th><th style="text-align:left;padding-left:12px">Nota</th></tr></thead>' +
+        '<tbody>' + det.map(d => '<tr style="border-top:0.5px solid var(--border)"><td style="padding:6px 4px">' + esc(d.profiles?.nombre||'-') + '</td><td style="text-align:right;font-family:DM Mono,monospace">' + fmt(d.monto) + '</td><td style="padding-left:12px;color:var(--text3)">' + esc(d.nota||'') + '</td></tr>').join('') + '</tbody>' +
+        '</table></div>';
+    });
+  }
+  html += '</div>'; // cierra card envios confirmados
 
   // Pagos de clientes
   html += '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
     (pagos.length === 0 ? '<div class="empty-state">Sin pagos registrados.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' — ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' — ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + esc(p.estado) + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>';
@@ -704,7 +660,6 @@ async function renderControlIntermediario() {
       await renderControlIntermediario();
     });
   });
-}
 }
 function toggleDetalle(id) {
   const el = document.getElementById(id);
@@ -792,28 +747,6 @@ function calcularDemoraEnvioTexto(envio, pagos) {
   return { label, color: avg <= 24 ? 'var(--green)' : 'var(--red)' };
 }
 
-function calcularDemoraEnvio(envio, pagos) {
-  const fechaEnvio = new Date(envio.created_at);
-  const det = envio.detalle_envio || [];
-  const clienteIds = new Set(det.map(d => d.cliente_profile_id));
-  // For each client in this envio, find their MOST RECENT pago before this envio
-  let tiempos = [];
-  clienteIds.forEach(function(cid) {
-    const pagosMasRecientes = pagos
-      .filter(p => p.cliente_profile_id === cid && p.estado === 'confirmado' && new Date(p.created_at) <= fechaEnvio)
-      .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
-    if (pagosMasRecientes.length > 0) {
-      const horas = (fechaEnvio - new Date(pagosMasRecientes[0].created_at)) / 3600000;
-      tiempos.push(horas);
-    }
-  });
-  if (!tiempos.length) return '';
-  const avgHoras = tiempos.reduce((s,h) => s+h, 0) / tiempos.length;
-  const label = avgHoras < 24 ? avgHoras.toFixed(1).replace('.',',') + 'hs' : (avgHoras/24).toFixed(1).replace('.',',') + 'd';
-  const ok = avgHoras <= 24;
-  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:DM Mono,monospace;white-space:nowrap;margin-right:4px">' + label + (ok?' ok':' tardio') + '</span>';
-}
-
 // Calcula demora entre pago de cliente y primer envio del intermediario que lo cubre
 function calcularDemoraBadge(pago, envios) {
   if (pago.estado !== 'confirmado') return '';
@@ -848,9 +781,9 @@ async function renderPagosClientes() {
     (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aun.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-avatar">' + (p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
-        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + '</div></div>' +
+        '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + (p.referencia?' - '+esc(p.referencia):'') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
         calcularDemoraBadge(p, allEnvios) +
@@ -891,19 +824,18 @@ async function renderClientes() {
     clientes.forEach(function(cl) {
       const tieneAcceso = clientesConAcceso.has(cl.nombre.toUpperCase().trim());
       const perfil = profiles.find(function(p) { return p.nombre.toUpperCase().trim() === cl.nombre.toUpperCase().trim(); });
-      const nombreSafe = cl.nombre.replace(/\\/g, '').replace(/'/g, '');
       const perfilId = perfil ? perfil.id : '';
 
-      html += '<div class="pago-row" data-cliente="' + cl.nombre + '">';
-      html += '<div class="pago-avatar">' + cl.nombre.substring(0,2).toUpperCase() + '</div>';
-      html += '<div class="pago-info"><div class="pago-name">' + cl.nombre + '</div>';
-      html += '<div class="pago-sub">Cod: ' + (cl.codigo||'-') + (perfil ? ' &middot; ' + perfil.email : '') + '</div></div>';
+      html += '<div class="pago-row" data-cliente="' + esc(cl.nombre) + '">';
+      html += '<div class="pago-avatar">' + esc(cl.nombre).substring(0,2).toUpperCase() + '</div>';
+      html += '<div class="pago-info"><div class="pago-name">' + esc(cl.nombre) + '</div>';
+      html += '<div class="pago-sub">Cod: ' + esc(cl.codigo||'-') + (perfil ? ' &middot; ' + esc(perfil.email) : '') + '</div></div>';
       if (tieneAcceso) {
         html += '<span class="badge badge-released">Con acceso</span>';
-        html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + perfilId + '" data-nombre="' + nombreSafe + '" data-type="revocar-acceso">Revocar</button>';
+        html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + esc(perfilId) + '" data-nombre="' + esc(cl.nombre) + '" data-type="revocar-acceso">Revocar</button>';
       } else {
         html += '<span class="badge badge-pending">Sin acceso</span>';
-        html += '<button class="btn btn-primary btn-sm" data-nombre="' + nombreSafe + '" data-type="dar-acceso">Dar acceso</button>';
+        html += '<button class="btn btn-primary btn-sm" data-nombre="' + esc(cl.nombre) + '" data-type="dar-acceso">Dar acceso</button>';
       }
       html += '</div>';
     });
@@ -992,11 +924,11 @@ async function renderUsuarios() {
     (profiles||[]).map(p => {
       const usuario = p.email.replace('@payflow.local','');
       const usuarioLabel = p.email.includes('@payflow.local') ? usuario : p.email;
-      return '<div class="pago-row"><div class="pago-avatar">' + p.nombre.substring(0,2).toUpperCase() + '</div>' +
-      '<div class="pago-info"><div class="pago-name">' + p.nombre + '</div><div class="pago-sub">Usuario: ' + usuarioLabel + '</div></div>' +
-      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + p.rol + '</span>' +
+      return '<div class="pago-row"><div class="pago-avatar">' + esc(p.nombre).substring(0,2).toUpperCase() + '</div>' +
+      '<div class="pago-info"><div class="pago-name">' + esc(p.nombre) + '</div><div class="pago-sub">Usuario: ' + esc(usuarioLabel) + '</div></div>' +
+      '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + esc(p.rol) + '</span>' +
       (p.activo===false ? '<span class="badge badge-late">Inactivo</span>' : '') +
-      '<button class="btn btn-sm" data-pid="' + p.id + '" data-pnombre="' + p.nombre.replace(/'/g,'').replace(/"/g,'') + '" data-type="btn-reset-pass">Reset pass</button>' +
+      '<button class="btn btn-sm" data-pid="' + esc(p.id) + '" data-pnombre="' + esc(p.nombre) + '" data-type="btn-reset-pass">Reset pass</button>' +
       (p.rol !== 'empresa'
         ? '<button class="btn btn-sm" style="color:' + (p.activo!==false?'var(--red)':'var(--green)') + ';border-color:' + (p.activo!==false?'var(--red-border)':'var(--green-border)') + '" data-pid="' + p.id + '" data-activo="' + (p.activo!==false?'true':'false') + '" data-type="btn-toggle-user">' + (p.activo!==false?'Desactivar':'Activar') + '</button>'
         : ''
@@ -1029,15 +961,21 @@ async function renderIntHome() {
     (lista.length === 0 ? '<div class="empty-state">No hay pagos pendientes de confirmacion.</div>' :
       lista.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-avatar">' + (p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
-        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Ver comprobante</a>' : '') +
-        '<button class="btn btn-confirm btn-sm" onclick="confirmarPagoCliente(\'' + p.id + '\',\'' + (p.profiles?.nombre||'') + '\',\'' + p.monto + '\')">Confirmar</button>' +
+        (p.comprobante_url ? '<a href="' + esc(p.comprobante_url) + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Ver comprobante</a>' : '') +
+        '<button class="btn btn-confirm btn-sm" data-id="' + esc(p.id) + '" data-nombre="' + esc(p.profiles?.nombre||'') + '" data-monto="' + Number(p.monto) + '" data-type="btn-conf-cli">Confirmar</button>' +
         '</div>'
       ).join('')
     ) + '</div>';
+
+  document.querySelectorAll('[data-type="btn-conf-cli"]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      confirmarPagoCliente(this.dataset.id, this.dataset.nombre, this.dataset.monto);
+    });
+  });
 }
 
 async function confirmarPagoCliente(id, nombre, monto) {
@@ -1067,6 +1005,11 @@ async function renderIntEnviar() {
     '<div class="form-group"><label class="form-label">Medio</label><select class="form-select" id="env-medio"><option value="usdt">USDT</option><option value="transferencia">Transferencia bancaria</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></div>' +
     '<div class="form-group"><label class="form-label">Referencia / Hash (opcional)</label><input class="form-input" id="env-ref" placeholder="Hash de transaccion, numero de referencia..."/></div>' +
         '<div class="form-group"><label class="form-label">Observaciones (opcional)</label><input class="form-input" id="env-obs" placeholder="Referencia, aclaracion, etc."/></div>' +
+    '<div class="form-group"><label class="form-label">Detalle por cliente (opcional)</label>' +
+    '<div id="lineas-clientes"></div>' +
+    '<button class="btn btn-sm" type="button" id="btn-add-linea" style="margin-top:6px">+ Agregar cliente</button>' +
+    '<div id="env-total-check" style="font-size:11px;margin-top:6px;color:var(--text3)"></div>' +
+    '</div>' +
     '<div class="form-group"><label class="form-label">Comprobante de transferencia (opcional)</label>' +
     '<div class="upload-zone" id="env-upload-zone"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF - max 5MB</div>' +
     '<input type="file" id="env-file" style="display:none" accept="image/*,.pdf"/></div>' +
@@ -1076,7 +1019,7 @@ async function renderIntEnviar() {
     '</div></div>';
 
 
-  // File upload zone
+  // File upload zone + agregar linea button
   setTimeout(function() {
     const zone = document.getElementById('env-upload-zone');
     const fileInput = document.getElementById('env-file');
@@ -1088,6 +1031,8 @@ async function renderIntEnviar() {
         }
       };
     }
+    const btnAdd = document.getElementById('btn-add-linea');
+    if (btnAdd) btnAdd.onclick = agregarLineaCliente;
   }, 100);
 }
 
@@ -1158,12 +1103,21 @@ function actualizarTotal() {
 }
 
 async function registrarEnvio() {
+  // Deshabilitar botón de inmediato para evitar doble envío (race condition)
+  const btn = document.querySelector('[onclick="registrarEnvio()"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Registrando...'; }
+
   const monto = parseFloat(document.getElementById('env-monto').value);
   const medio = document.getElementById('env-medio').value;
   const ref = document.getElementById('env-ref').value;
-  if (!monto) { alert('Ingresa el monto total.'); return; }
 
-  // Verificar que el monto no supere el saldo disponible
+  if (!monto) {
+    alert('Ingresa el monto total.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
+    return;
+  }
+
+  // Verificar saldo disponible
   const { data: pagRes2 } = await db.from('pagos_cliente').select('monto').eq('estado','confirmado');
   const { data: envRes2 } = await db.from('envios_intermediario').select('monto_total');
   const totalConfirmado = (pagRes2||[]).reduce((s,p) => s+Number(p.monto), 0);
@@ -1171,11 +1125,12 @@ async function registrarEnvio() {
   const saldoDisponible = totalConfirmado - totalEnviado;
 
   if (monto > saldoDisponible + 0.01) {
-    alert('El monto a enviar (USD ' + fmt(monto) + ') supera el saldo disponible (USD ' + fmt(saldoDisponible) + '). No podes enviar mas de lo que recibiste.');
+    alert('El monto a enviar (USD ' + fmt(monto) + ') supera el saldo disponible (USD ' + fmt(saldoDisponible) + ').');
+    if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
     return;
   }
 
-  // Upload comprobante if present
+  // Upload comprobante si hay archivo
   let comprobante_url = null;
   const fileInput = document.getElementById('env-file');
   if (fileInput && fileInput.files[0]) {
@@ -1190,12 +1145,32 @@ async function registrarEnvio() {
   }
 
   const obs = document.getElementById('env-obs')?.value || '';
-  const { data: envio, error } = await db.from('envios_intermediario').insert({ monto_total: monto, medio, referencia: ref, notas: obs, comprobante_url }).select().single();
-  if (error) { alert('Error al registrar.'); return; }
+  const { data: envio, error } = await db.from('envios_intermediario')
+    .insert({ monto_total: monto, medio, referencia: ref, notas: obs, comprobante_url, pagador_id: currentUser.id })
+    .select().single();
+  if (error) {
+    alert('Error al registrar: ' + error.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
+    return;
+  }
+
+  // Insertar detalle_envio por cliente si se cargaron líneas
+  const lineas = [];
+  document.querySelectorAll('[id^="linea-"][id$="-cli"]').forEach(function(el) {
+    const lineId = el.id.replace('-cli', '');
+    const cliId = el.value;
+    const montoLinea = parseFloat(document.getElementById(lineId + '-monto')?.value) || 0;
+    const nota = document.getElementById(lineId + '-nota')?.value || '';
+    if (cliId && montoLinea > 0) {
+      lineas.push({ envio_id: envio.id, cliente_profile_id: cliId, monto: montoLinea, nota });
+    }
+  });
+  if (lineas.length > 0) {
+    await db.from('detalle_envio').insert(lineas);
+  }
 
   const msg = document.getElementById('env-msg');
-  msg.textContent = 'Envio registrado correctamente. La empresa lo vera reflejado.';
-  msg.style.display = 'flex';
+  if (msg) { msg.textContent = 'Envio registrado correctamente. La empresa lo vera reflejado.'; msg.style.display = 'flex'; }
   setTimeout(() => loadView('int-historial'), 1500);
 }
 
@@ -1237,10 +1212,10 @@ async function renderIntHistorial(desde, hasta) {
         const det = e.detalle_envio || [];
         return '<div style="border-bottom:0.5px solid var(--border)">' +
           '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'henv-' + e.id + '\')">' +
-          '<div class="pago-info"><div class="pago-name">' + e.medio + (e.referencia?' - '+e.referencia:'') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + '</div></div>' +
+          '<div class="pago-info"><div class="pago-name">' + esc(e.medio) + (e.referencia?' - '+esc(e.referencia):'') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + '</div></div>' +
           '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div><span style="font-size:11px;color:var(--text3)">ver detalle</span></div>' +
           '<div id="henv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
-          det.map(d => '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border)"><span>' + (d.profiles?.nombre||'-') + (d.nota?' - '+d.nota:'') + '</span><span style="font-family:\'DM Mono\',monospace">USD ' + fmt(d.monto) + '</span></div>').join('') +
+          det.map(d => '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border)"><span>' + esc(d.profiles?.nombre||'-') + (d.nota?' - '+esc(d.nota):'') + '</span><span style="font-family:\'DM Mono\',monospace">USD ' + fmt(d.monto) + '</span></div>').join('') +
           '</div></div>';
       }).join('')
     ) + '</div>' +
@@ -1248,12 +1223,22 @@ async function renderIntHistorial(desde, hasta) {
     (pagos.length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + (p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + p.forma_pago + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + p.estado + '</span>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + esc(p.estado) + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>';
+
+  // Listener del botón filtrar (no tenía ninguno)
+  const btnFilter = document.getElementById('btn-hist-filter');
+  if (btnFilter) {
+    btnFilter.onclick = function() {
+      const d = document.getElementById('hist-desde')?.value;
+      const h = document.getElementById('hist-hasta')?.value;
+      if (d && h) renderIntHistorial(d + 'T00:00:00', h + 'T23:59:59');
+    };
+  }
 }
 
 // ── EMPRESA: COMISION INTERMEDIARIO ──
@@ -1308,7 +1293,7 @@ async function renderComisionEmpresa() {
   } else {
     items.forEach(function(item) {
       html += '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + item.cliente + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(item.cliente) + '</div>' +
         '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + ' · ' + String(item.horas).replace('.',',') + 'hs hasta envio</div></div>' +
         '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' +
         '<span class="badge badge-released">Comision: USD ' + fmtDec(item.comision, 2) + '</span>' +
@@ -1333,7 +1318,7 @@ async function renderComisionEmpresa() {
   if (pagosCom.length > 0) {
     html += '<div class="card"><div class="card-header"><div class="card-title">Historial de pagos de comision</div></div>';
     pagosCom.forEach(function(p) {
-      html += '<div class="data-row"><span class="data-label">' + new Date(p.created_at).toLocaleDateString('es-AR') + (p.notas ? ' · ' + p.notas : '') + '</span><span class="data-value">USD ' + fmtDec(p.monto, 2) + '</span></div>';
+      html += '<div class="data-row"><span class="data-label">' + new Date(p.created_at).toLocaleDateString('es-AR') + (p.notas ? ' · ' + esc(p.notas) : '') + '</span><span class="data-value">USD ' + fmtDec(p.monto, 2) + '</span></div>';
     });
     html += '</div>';
   }
@@ -1361,31 +1346,15 @@ async function renderComisionEmpresa() {
 
 // ── CLIENTE: HOME ──
 async function renderCliHome() {
-  const cuenta = null;
   const { data: pagos } = await db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false });
 
   const c = document.getElementById('main-content');
-  let html = '';
-
-  if (cuenta) {
-    html +=
-      '<div class="metrics">' +
-      '<div class="metric"><div class="metric-label">Saldo en ERP</div><div class="metric-value danger">USD ' + fmt(cuenta.saldo) + '</div><div class="metric-sub">segun Open Orange</div></div>' +
-      '<div class="metric"><div class="metric-label">Vencido</div><div class="metric-value ' + (cuenta.vencido>0?'danger':'ok') + '">USD ' + fmt(cuenta.vencido) + '</div><div class="metric-sub">' + (cuenta.vencido>0?'pago urgente':'al dia') + '</div></div>' +
-      '<div class="metric"><div class="metric-label">Facturas</div><div class="metric-value">' + cuenta.facturas.length + '</div><div class="metric-sub">comprobantes pendientes</div></div>' +
-      '</div>' +
-      '<div class="card section-gap"><div class="card-header"><div class="card-title">Mis facturas</div></div>' +
-      '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--text3);text-align:left;border-bottom:0.5px solid var(--border)"><th style="padding:10px 18px">Tipo</th><th>Nro</th><th>Vto.</th><th>Dias</th><th style="text-align:right;padding-right:18px">Saldo USD</th></tr></thead><tbody>' +
-      cuenta.facturas.map(f => '<tr style="border-bottom:0.5px solid var(--border)"><td style="padding:10px 18px">' + f.tipo + '</td><td>' + f.nro + '</td><td>' + f.vto + '</td><td style="color:' + (f.diasVencidos>0?'var(--red)':'var(--green)') + ';font-weight:500">' + f.diasVencidos + 'd</td><td style="text-align:right;padding-right:18px;font-family:\'DM Mono\',monospace;font-weight:500">' + fmt(f.saldo) + '</td></tr>').join('') +
-      '</tbody></table></div>';
-  }
-
-  html +=
+  let html =
     '<div class="card"><div class="card-header"><div class="card-title">Mis pagos informados</div><button class="btn btn-primary btn-sm" onclick="loadView(\'cli-pagar\')">+ Informar pago</button></div>' +
     (!(pagos||[]).length ? '<div class="empty-state">No has informado pagos aun.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">Pago del ' + new Date(p.created_at).toLocaleDateString('es-AR') + '</div><div class="pago-sub">' + p.forma_pago + (p.referencia?' - '+p.referencia:'') + ' - registrado ' + new Date(p.created_at).toLocaleTimeString('es-AR') + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">Pago del ' + new Date(p.created_at).toLocaleDateString('es-AR') + '</div><div class="pago-sub">' + esc(p.forma_pago) + (p.referencia?' - '+esc(p.referencia):'') + ' - registrado ' + new Date(p.created_at).toLocaleTimeString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Esperando confirmacion') + '</span>' +
         '</div>'
@@ -1447,7 +1416,7 @@ async function renderIntComision() {
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
       detalleComision.map(d =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + d.cliente + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
         '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : String(d.horas).replace('.', ',') + 'hs hasta el envio') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
@@ -1545,15 +1514,30 @@ async function crearUsuario() {
   const pass = document.getElementById('nu-pass').value;
   const rol = document.getElementById('nu-rol').value;
   const errEl = document.getElementById('modal-error');
+  const btnCrear = document.querySelector('#modal-crear-usuario .btn-primary');
   errEl.style.display = 'none';
   if (!nombre || !usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
-  const email = usuario + '@payflow.local';
-  const { data, error } = await db.auth.signUp({ email, password: pass, options: { data: { nombre, rol } } });
-  if (error) { showErr(errEl, error.message); return; }
-  cerrarModal('modal-crear-usuario');
-  alert('Usuario creado correctamente.\n\nNombre: ' + nombre + '\nUsuario: ' + usuario + '\nContrasena: ' + pass + '\n\nGuarda estos datos para compartirlos con el usuario.');
-  await renderUsuarios();
+  if (btnCrear) { btnCrear.disabled = true; btnCrear.textContent = 'Creando...'; }
+  try {
+    const { data: sessionData } = await db.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const email = usuario + '@payflow.local';
+    const res = await fetch(BACKEND_URL + '/api/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ nombre, email, password: pass, rol })
+    });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    cerrarModal('modal-crear-usuario');
+    alert('Usuario creado correctamente.\n\nNombre: ' + nombre + '\nUsuario: ' + usuario + '\nContrasena: ' + pass + '\n\nGuarda estos datos para compartirlos con el usuario.');
+    await renderUsuarios();
+  } catch(e) {
+    showErr(errEl, 'Error al crear usuario: ' + e.message);
+  } finally {
+    if (btnCrear) { btnCrear.disabled = false; btnCrear.textContent = 'Crear usuario'; }
+  }
 }
 
 let resetProfileId = null;
@@ -1583,7 +1567,7 @@ async function confirmarResetPass() {
     const { data: sessionData } = await db.auth.getSession();
     const token = sessionData?.session?.access_token;
 
-    const res = await fetch('https://payflow-backend-production-ef4f.up.railway.app/api/reset-password', {
+    const res = await fetch(BACKEND_URL + '/api/reset-password', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -1618,17 +1602,16 @@ async function cambiarPassObligatorio() {
   const { data: sessionData } = await db.auth.getSession();
   const token = sessionData?.session?.access_token;
 
-  const res = await fetch('https://payflow-backend-production-ef4f.up.railway.app/api/reset-password', {
+  const res = await fetch(BACKEND_URL + '/api/change-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({ userId: currentUser.id, newPassword: pass1 })
+    body: JSON.stringify({ newPassword: pass1 })
   });
 
   const result = await res.json();
   if (result.error) { showErr(errEl, 'Error: ' + result.error); return; }
 
-  // Clear force_password_change flag
-  await db.from('profiles').update({ force_password_change: false }).eq('id', currentUser.id);
+  // El backend ya limpia force_password_change, pero lo reflejamos en local también
   currentProfile.force_password_change = false;
 
   document.getElementById('change-pass-screen').style.display = 'none';
@@ -1646,7 +1629,8 @@ function generarPassAleatoria() {
 }
 
 // HELPERS
-function fmt(n) { return Number(n).toLocaleString('es-AR'); }
+function esc(str) { return String(str??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function fmt(n) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDec(n, d) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d}); }
 function abrirModal(id) { document.getElementById(id).classList.add('open'); }
 function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
