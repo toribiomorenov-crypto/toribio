@@ -305,6 +305,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </div>
 
 <!-- MODAL: Reset contraseña -->
+<div class="modal-overlay" id="modal-editar-usuario">
+  <div class="modal">
+    <div class="modal-title">Editar usuario — <span id="edit-nombre-label"></span></div>
+    <div class="login-error" id="edit-error"></div>
+    <div class="form-group">
+      <label class="form-label">Email de notificaciones</label>
+      <input class="form-input" type="email" id="edit-email-notif" placeholder="email@ejemplo.com"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">A este email le llegan los avisos de pagos y envíos.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarModal('modal-editar-usuario')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-guardar-editar">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="modal-reset-pass">
   <div class="modal">
     <div class="modal-title">Resetear contraseña</div>
@@ -1054,6 +1070,7 @@ async function renderUsuarios() {
       return '<div class="pago-row"><div class="pago-avatar">' + esc(p.nombre).substring(0,2).toUpperCase() + '</div>' +
       '<div class="pago-info"><div class="pago-name">' + esc(p.nombre) + '</div><div class="pago-sub">Usuario: ' + esc(usuarioLabel) + '</div></div>' +
       '<span class="badge ' + (p.rol==='empresa'?'badge-released':p.rol==='pagador'?'badge-confirmed':'badge-pending') + '">' + esc(p.rol) + '</span>' +
+      '<button class="btn btn-sm" data-pid="' + esc(p.id) + '" data-pnombre="' + esc(p.nombre) + '" data-pemailnotif="' + esc(p.email_notif||'') + '" data-type="btn-edit-user">Editar</button>' +
       '<button class="btn btn-sm" data-pid="' + esc(p.id) + '" data-pnombre="' + esc(p.nombre) + '" data-type="btn-reset-pass">Reset pass</button>' +
       (p.rol !== 'empresa'
         ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-activo="true" data-type="btn-toggle-user">Desactivar</button>'
@@ -1063,6 +1080,9 @@ async function renderUsuarios() {
     }).join('') + '</div>';
 
   // Attach events after DOM update
+  document.querySelectorAll('[data-type="btn-edit-user"]').forEach(function(btn) {
+    btn.onclick = function() { abrirEditarUsuario(this.getAttribute('data-pid'), this.getAttribute('data-pnombre'), this.getAttribute('data-pemailnotif')); };
+  });
   document.querySelectorAll('[data-type="btn-reset-pass"]').forEach(function(btn) {
     btn.onclick = function() { abrirResetPass(this.getAttribute('data-pid'), this.getAttribute('data-pnombre')); };
   });
@@ -1736,6 +1756,39 @@ async function crearUsuario() {
   } finally {
     if (btnCrear) { btnCrear.disabled = false; btnCrear.textContent = 'Crear usuario'; }
   }
+}
+
+let editProfileId = null;
+function abrirEditarUsuario(profileId, nombre, emailNotif) {
+  editProfileId = profileId;
+  document.getElementById('edit-nombre-label').textContent = nombre;
+  document.getElementById('edit-email-notif').value = emailNotif || '';
+  document.getElementById('edit-error').style.display = 'none';
+  abrirModal('modal-editar-usuario');
+  document.getElementById('btn-guardar-editar').onclick = guardarEditarUsuario;
+}
+
+async function guardarEditarUsuario() {
+  const emailNotif = document.getElementById('edit-email-notif').value.trim();
+  const errEl = document.getElementById('edit-error');
+  const btn = document.getElementById('btn-guardar-editar');
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Guardando...';
+  try {
+    const { data: s } = await db.auth.getSession();
+    const token = s?.session?.access_token;
+    const res = await fetch(BACKEND_URL + '/api/update-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ userId: editProfileId, emailNotif: emailNotif || null })
+    });
+    const result = await res.json();
+    if (!res.ok) { showErr(errEl, result.error || 'Error al guardar'); btn.disabled = false; btn.textContent = 'Guardar'; return; }
+  } catch(e) {
+    showErr(errEl, 'Error de conexion'); btn.disabled = false; btn.textContent = 'Guardar'; return;
+  }
+  cerrarModal('modal-editar-usuario');
+  await renderUsuarios();
 }
 
 let resetProfileId = null;
