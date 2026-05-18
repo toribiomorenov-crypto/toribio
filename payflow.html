@@ -1023,7 +1023,20 @@ function abrirCrearAcceso(nombre) {
 
 async function revocarAcceso(profileId, nombre) {
   if (!confirm('Revocar acceso de ' + nombre + '?')) return;
-  await db.from('profiles').update({ activo: false }).eq('id', profileId);
+  try {
+    const { data: s } = await db.auth.getSession();
+    const token = s?.session?.access_token;
+    const res = await fetch(BACKEND_URL + '/api/toggle-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ userId: profileId, activo: false })
+    });
+    const result = await res.json();
+    if (!res.ok) { alert('Error: ' + (result.error || 'No se pudo revocar el acceso')); return; }
+  } catch(e) {
+    alert('Error de conexion al revocar el acceso');
+    return;
+  }
   await renderClientes();
 }
 
