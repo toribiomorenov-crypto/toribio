@@ -170,8 +170,16 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </head>
 <body>
 
+<!-- ===== LOADING ===== -->
+<div id="loading-screen" style="display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);">
+  <div style="text-align:center;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">PayFlow</div>
+    <div style="font-size:12px;color:var(--text3);font-family:'DM Mono',monospace;">cargando...</div>
+  </div>
+</div>
+
 <!-- ===== LOGIN ===== -->
-<div id="login-screen">
+<div id="login-screen" style="display:none">
   <div class="login-card">
     <div class="login-logo">PayFlow</div>
     <div class="login-sub">plataforma de pagos</div>
@@ -327,7 +335,6 @@ let realtimeChannel = null;
 
 // AUTH
 async function doLogin() {
-  console.log('[PF] doLogin called');
   let usuario = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
@@ -335,11 +342,9 @@ async function doLogin() {
   if (!usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
   // Si no tiene @, convertir a formato email interno
   const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
-  console.log('[PF] signing in as:', email);
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
-  console.log('[PF] signIn result - error:', error, 'user:', data?.user?.id);
   if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
-  console.log('[PF] signIn OK, waiting for onAuthStateChange...');
+  // onAuthStateChange (evento SIGNED_IN) llama initApp automaticamente
 }
 
 async function doLogout() {
@@ -351,17 +356,17 @@ async function doLogout() {
 }
 
 async function initApp(user) {
-  console.log('[PF] initApp called, currentUser:', !!currentUser);
   if (currentUser) return; // guard: bloquea llamadas concurrentes
   currentUser = user;      // mutex: se setea temprano para evitar race condition
   try {
     const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-    console.log('[PF] profile loaded:', !!profile, 'error:', error?.message, 'activo:', profile?.activo, 'force_pw:', profile?.force_password_change);
     let finalProfile;
     if (error || !profile) {
       const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
       if (ie || !newProfile) {
-        currentUser = null; // limpiar mutex en error
+        currentUser = null;
+        document.getElementById('loading-screen').style.display = 'none';
+        document.getElementById('login-screen').style.display = 'flex';
         showErr(document.getElementById('login-error'), 'Error al cargar perfil.');
         await db.auth.signOut();
         return;
@@ -371,20 +376,23 @@ async function initApp(user) {
       finalProfile = profile;
     }
     if (finalProfile.activo === false) {
-      currentUser = null; currentProfile = null; // limpiar mutex
-      await db.auth.signOut();
-      showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
+      currentUser = null; currentProfile = null;
+      document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('login-screen').style.display = 'flex';
+      showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
+      await db.auth.signOut();
       return;
     }
     currentProfile = finalProfile;
     if (finalProfile.force_password_change === true) {
+      document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('login-screen').style.display = 'none';
       document.getElementById('app-screen').style.display = 'none';
       document.getElementById('change-pass-screen').style.display = 'flex';
       return;
     }
     // Todo OK — mostrar app
+    document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('app-screen').style.display = 'block';
     document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
@@ -405,25 +413,22 @@ async function initApp(user) {
 }
 
 db.auth.onAuthStateChange(async (event, session) => {
-  console.log('[PF] onAuthStateChange:', event, '| session:', !!session, '| currentUser:', !!currentUser);
-  if (event === 'SIGNED_OUT') {
+  if (event === 'SIGNED_OUT' || !session) {
     currentUser = null; currentProfile = null;
     if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
+    document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('app-screen').style.display = 'none';
+    document.getElementById('change-pass-screen').style.display = 'none';
     document.getElementById('login-screen').style.display = 'flex';
     return;
   }
   if (session && !currentUser) {
-    console.log('[PF] calling initApp...');
     try {
       await initApp(session.user);
     } catch(e) {
-      console.error('[PF] initApp threw:', e);
       currentUser = null; currentProfile = null;
       await db.auth.signOut();
     }
-  } else {
-    console.log('[PF] skipping initApp - session:', !!session, 'currentUser:', !!currentUser);
   }
 });
 
