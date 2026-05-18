@@ -336,8 +336,7 @@ async function doLogin() {
   const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
   if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
-  currentUser = null; currentProfile = null; // reset por si habia sesion previa fallida
-  await initApp(data.user);
+  // onAuthStateChange (evento SIGNED_IN) llama initApp automaticamente
 }
 
 async function doLogout() {
