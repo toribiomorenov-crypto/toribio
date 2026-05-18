@@ -351,10 +351,12 @@ async function doLogout() {
 }
 
 async function initApp(user) {
+  console.log('[PF] initApp called, currentUser:', !!currentUser);
   if (currentUser) return; // guard: bloquea llamadas concurrentes
   currentUser = user;      // mutex: se setea temprano para evitar race condition
   try {
     const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
+    console.log('[PF] profile loaded:', !!profile, 'error:', error?.message, 'activo:', profile?.activo, 'force_pw:', profile?.force_password_change);
     let finalProfile;
     if (error || !profile) {
       const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
