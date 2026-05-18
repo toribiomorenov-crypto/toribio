@@ -332,10 +332,12 @@ const db = createClient(SUPA_URL, SUPA_KEY);
 let currentUser = null;
 let currentProfile = null;
 
-// Fallback: si despues de 5s sigue en loading, mostrar login
+// Fallback: si despues de 5s sigue en loading, limpiar estado y mostrar login
 setTimeout(function() {
   const ls = document.getElementById('loading-screen');
   if (ls && ls.style.display !== 'none') {
+    currentUser = null;
+    currentProfile = null;
     ls.style.display = 'none';
     document.getElementById('login-screen').style.display = 'flex';
   }
@@ -351,6 +353,7 @@ async function doLogin() {
   if (!usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
   // Si no tiene @, convertir a formato email interno
   const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
+  currentUser = null; currentProfile = null; // limpiar cualquier estado previo
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
   if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
   // onAuthStateChange (evento SIGNED_IN) llama initApp automaticamente
