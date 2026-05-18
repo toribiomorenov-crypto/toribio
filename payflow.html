@@ -1152,7 +1152,10 @@ async function renderIntEnviar() {
     '<div class="form-group"><label class="form-label">Comprobante de transferencia (opcional)</label>' +
     '<div class="upload-zone" id="env-upload-zone"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF - max 5MB</div>' +
     '<input type="file" id="env-file" style="display:none" accept="image/*,.pdf"/></div>' +
-    '<div id="env-file-name" style="font-size:11px;color:var(--text3);margin-top:4px"></div></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin-top:4px">' +
+    '<span id="env-file-name" style="font-size:11px;color:var(--text3);flex:1"></span>' +
+    '<button type="button" id="env-file-clear" style="display:none;font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:0" onclick="document.getElementById(\'env-file\').value=\'\';document.getElementById(\'env-file-name\').textContent=\'\';this.style.display=\'none\'">✕ Quitar</button>' +
+    '</div></div>' +
     '<div id="env-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
     '<button class="btn btn-primary" onclick="registrarEnvio()">Registrar envio</button>' +
     '</div></div>';
@@ -1167,6 +1170,7 @@ async function renderIntEnviar() {
       fileInput.onchange = function() {
         if (fileInput.files[0]) {
           document.getElementById('env-file-name').textContent = 'Archivo: ' + fileInput.files[0].name;
+          document.getElementById('env-file-clear').style.display = 'inline';
         }
       };
     }
@@ -1649,14 +1653,20 @@ async function renderCliPagar() {
     '<div class="form-group"><label class="form-label">Forma de pago</label><select class="form-select" id="cp-forma"><option value="efectivo">Efectivo</option><option value="usdt">USDT</option><option value="cheque">Cheque</option><option value="transferencia">Transferencia</option><option value="otro">Otro</option></select></div>' +
     '<div class="form-group"><label class="form-label">Referencia (opcional)</label><input class="form-input" id="cp-ref" placeholder="Numero de transaccion, hash, etc."/></div>' +
     '<div class="upload-zone" onclick="document.getElementById(\'cp-file\').click()"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF, captura - max 5MB</div><input type="file" id="cp-file" style="display:none" accept="image/*,.pdf"/></div>' +
-    '<div id="cp-file-name" style="font-size:12px;color:var(--text3);margin:-8px 0 12px"></div>' +
+    '<div style="display:flex;align-items:center;gap:8px;margin:-8px 0 12px">' +
+    '<span id="cp-file-name" style="font-size:12px;color:var(--text3);flex:1"></span>' +
+    '<button type="button" id="cp-file-clear" style="display:none;font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:0" onclick="document.getElementById(\'cp-file\').value=\'\';document.getElementById(\'cp-file-name\').textContent=\'\';this.style.display=\'none\'">✕ Quitar</button>' +
+    '</div>' +
     '<div id="cp-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
     '<button class="btn btn-primary" onclick="informarPago()">Enviar informe de pago</button>' +
     '</div></div>';
 
   document.getElementById('cp-file').addEventListener('change', e => {
     const f = e.target.files[0];
-    if (f) document.getElementById('cp-file-name').textContent = 'Archivo: ' + f.name;
+    if (f) {
+      document.getElementById('cp-file-name').textContent = 'Archivo: ' + f.name;
+      document.getElementById('cp-file-clear').style.display = 'inline';
+    }
   });
 }
 
