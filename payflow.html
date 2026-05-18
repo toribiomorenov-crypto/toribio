@@ -331,118 +331,117 @@ const db = createClient(SUPA_URL, SUPA_KEY);
 
 let currentUser = null;
 let currentProfile = null;
-
-// Fallback: si despues de 5s sigue en loading, limpiar estado y mostrar login
-setTimeout(function() {
-  const ls = document.getElementById('loading-screen');
-  if (ls && ls.style.display !== 'none') {
-    currentUser = null;
-    currentProfile = null;
-    ls.style.display = 'none';
-    document.getElementById('login-screen').style.display = 'flex';
-  }
-}, 5000);
 let realtimeChannel = null;
 
-// AUTH
+// ── Helpers de pantalla ──
+function showLoginScreen(errMsg) {
+  currentUser = null; currentProfile = null;
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('change-pass-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  if (errMsg) showErr(document.getElementById('login-error'), errMsg);
+}
+function showAppScreen() {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('change-pass-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'block';
+}
+function showChangePassScreen() {
+  document.getElementById('loading-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById('change-pass-screen').style.display = 'flex';
+}
+
+// ── initApp: carga perfil y muestra la app ──
+// Solo se llama desde doLogin() y desde la verificacion de sesion al inicio.
+// NO se llama desde onAuthStateChange para evitar race conditions.
+async function initApp(user) {
+  const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
+  let finalProfile;
+  if (error || !profile) {
+    const { data: newProfile, error: ie } = await db.from('profiles').upsert(
+      { id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' },
+      { onConflict: 'id' }
+    ).select().single();
+    if (ie || !newProfile) {
+      await db.auth.signOut();
+      showLoginScreen('Error al cargar perfil. Intenta de nuevo.');
+      return;
+    }
+    finalProfile = newProfile;
+  } else {
+    finalProfile = profile;
+  }
+  if (finalProfile.activo === false) {
+    await db.auth.signOut();
+    showLoginScreen('Tu usuario esta desactivado. Contacta a la empresa.');
+    return;
+  }
+  currentUser = user;
+  currentProfile = finalProfile;
+  if (finalProfile.force_password_change === true) {
+    showChangePassScreen();
+    return;
+  }
+  showAppScreen();
+  document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
+  document.getElementById('sidebar-rol').textContent = currentProfile.rol;
+  const mUN = document.getElementById('mobile-user-nombre');
+  if (mUN) mUN.textContent = currentProfile.nombre;
+  buildSidebar(currentProfile.rol);
+  const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
+  loadView(defaultView);
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  setupRealtime(currentProfile.rol);
+}
+
+// ── Login ──
 async function doLogin() {
-  let usuario = document.getElementById('login-email').value.trim().toLowerCase();
+  const usuario = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
   errEl.style.display = 'none';
   if (!usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
-  // Si no tiene @, convertir a formato email interno
   const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
-  currentUser = null; currentProfile = null; // limpiar cualquier estado previo
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
   if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
-  // onAuthStateChange (evento SIGNED_IN) llama initApp automaticamente
+  await initApp(data.user);
 }
 
+// ── Logout ──
 async function doLogout() {
   if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
-  await db.auth.signOut();
   currentUser = null; currentProfile = null;
-  document.getElementById('app-screen').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
+  await db.auth.signOut();
+  showLoginScreen();
 }
 
-async function initApp(user) {
-  if (currentUser) return; // guard: bloquea llamadas concurrentes
-  currentUser = user;      // mutex: se setea temprano para evitar race condition
-  try {
-    const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).single();
-    let finalProfile;
-    if (error || !profile) {
-      const { data: newProfile, error: ie } = await db.from('profiles').upsert({ id: user.id, nombre: user.user_metadata?.nombre || user.email.split('@')[0], email: user.email, rol: user.user_metadata?.rol || 'empresa' }, { onConflict: 'id' }).select().single();
-      if (ie || !newProfile) {
-        currentUser = null;
-        document.getElementById('loading-screen').style.display = 'none';
-        document.getElementById('login-screen').style.display = 'flex';
-        showErr(document.getElementById('login-error'), 'Error al cargar perfil.');
-        await db.auth.signOut();
-        return;
-      }
-      finalProfile = newProfile;
-    } else {
-      finalProfile = profile;
-    }
-    if (finalProfile.activo === false) {
-      currentUser = null; currentProfile = null;
-      document.getElementById('loading-screen').style.display = 'none';
-      document.getElementById('login-screen').style.display = 'flex';
-      showErr(document.getElementById('login-error'), 'Tu usuario esta desactivado. Contacta a la empresa.');
-      await db.auth.signOut();
-      return;
-    }
-    currentProfile = finalProfile;
-    if (finalProfile.force_password_change === true) {
-      document.getElementById('loading-screen').style.display = 'none';
-      document.getElementById('login-screen').style.display = 'none';
-      document.getElementById('app-screen').style.display = 'none';
-      document.getElementById('change-pass-screen').style.display = 'flex';
-      return;
-    }
-    // Todo OK — mostrar app
-    document.getElementById('loading-screen').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'block';
-    document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
-    document.getElementById('sidebar-rol').textContent = currentProfile.rol;
-    const mUN = document.getElementById('mobile-user-nombre');
-    if (mUN) mUN.textContent = currentProfile.nombre;
-    buildSidebar(currentProfile.rol);
-    const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
-    loadView(defaultView);
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-    setupRealtime(currentProfile.rol);
-  } catch(e) {
-    currentUser = null; currentProfile = null; // limpiar mutex en excepcion
-    throw e; // re-throw para que onAuthStateChange lo maneje
-  }
-}
-
-db.auth.onAuthStateChange(async (event, session) => {
-  if (event === 'SIGNED_OUT' || !session) {
-    currentUser = null; currentProfile = null;
+// ── onAuthStateChange: SOLO maneja cierre de sesion externo (otra pestaña, token expirado) ──
+db.auth.onAuthStateChange(function(event, session) {
+  if (event === 'SIGNED_OUT') {
     if (realtimeChannel) { db.removeChannel(realtimeChannel); realtimeChannel = null; }
-    document.getElementById('loading-screen').style.display = 'none';
-    document.getElementById('app-screen').style.display = 'none';
-    document.getElementById('change-pass-screen').style.display = 'none';
-    document.getElementById('login-screen').style.display = 'flex';
-    return;
-  }
-  if (session && !currentUser) {
-    try {
-      await initApp(session.user);
-    } catch(e) {
-      currentUser = null; currentProfile = null;
-      await db.auth.signOut();
-    }
+    showLoginScreen();
   }
 });
+
+// ── Verificar sesion al inicio (UNA sola vez, sin race conditions) ──
+(async function checkInitialSession() {
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    if (session && session.user) {
+      await initApp(session.user);
+    } else {
+      showLoginScreen();
+    }
+  } catch(e) {
+    showLoginScreen();
+  }
+})();
 
 // ── Notificaciones en tiempo real (Supabase Realtime) ──
 function setupRealtime(rol) {
