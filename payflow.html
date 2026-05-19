@@ -510,9 +510,9 @@ function buildSidebar(rol) {
   const menus = {
     empresa: [
       { id:'dashboard', label:'Dashboard' },
-      { id:'control-intermediario', label:'Control intermediario' },
-      { id:'pagos-clientes', label:'Pagos de clientes' },
-      { id:'comision-empresa', label:'Comision intermediario' },
+      { id:'control-intermediario', label:'Intermediario' },
+      { id:'pagos-clientes', label:'Cobros' },
+      { id:'comision-empresa', label:'Comisión' },
       { id:'clientes', label:'Clientes' },
       { id:'usuarios', label:'Usuarios' },
     ],
@@ -520,7 +520,7 @@ function buildSidebar(rol) {
       { id:'int-home', label:'Pagos recibidos' },
       { id:'int-enviar', label:'Enviar a empresa' },
       { id:'int-historial', label:'Mi historial' },
-      { id:'int-comision', label:'Mi comision' },
+      { id:'int-comision', label:'Mi comisión' },
     ],
     cliente: [
       { id:'cli-home', label:'Mi cuenta' },
@@ -564,22 +564,24 @@ async function loadView(id) {
   setActiveNav(id);
   document.getElementById('main-content').innerHTML = '<div class="loading">Cargando...</div>';
   const titles = {
-    'dashboard': ['Dashboard', 'Vision general del negocio'],
-    'control-intermediario': ['Control del intermediario', 'Seguimiento de fondos en poder del intermediario'],
-    'pagos-clientes': ['Pagos de clientes', 'Historial de pagos informados por clientes'],
-    'comision-empresa': ['Comision del intermediario', 'Calculo y pago de comision mensual'],
-    'clientes': ['Clientes', 'Alta y gestion de clientes'],
-    'usuarios': ['Usuarios', 'Gestion de accesos'],
-    'int-home': ['Pagos recibidos', 'Registra cobros de clientes'],
-    'int-enviar': ['Enviar a empresa', 'Informa transferencias a la empresa'],
-    'int-historial': ['Mi historial', 'Todos tus movimientos'],
-    'int-comision': ['Mi comision', 'Calculo de comision por periodo'],
-    'cli-home': ['Mi cuenta', 'Tu saldo y estado de pagos'],
-    'cli-pagar': ['Informar pago', 'Notifica un pago al intermediario'],
+    'dashboard': ['Dashboard', ''],
+    'control-intermediario': ['Intermediario', ''],
+    'pagos-clientes': ['Cobros de clientes', ''],
+    'comision-empresa': ['Comisión', ''],
+    'clientes': ['Clientes', ''],
+    'usuarios': ['Usuarios', ''],
+    'int-home': ['Pagos recibidos', ''],
+    'int-enviar': ['Enviar a empresa', ''],
+    'int-historial': ['Mi historial', ''],
+    'int-comision': ['Mi comisión', ''],
+    'cli-home': ['Mi cuenta', ''],
+    'cli-pagar': ['Informar pago', ''],
   };
   const [title, sub] = titles[id] || ['Panel', ''];
   document.getElementById('page-title').textContent = title;
-  document.getElementById('page-subtitle').textContent = sub;
+  const subEl = document.getElementById('page-subtitle');
+  subEl.textContent = sub;
+  subEl.style.display = sub ? '' : 'none';
 
   const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
   if (views[id]) await views[id]();
@@ -602,17 +604,6 @@ async function renderDashboard() {
   const enviosPendConf = envios.filter(e => e.confirmado !== true);
   const montoEnviosPend = enviosPendConf.reduce((s,e) => s + Number(e.monto_total), 0);
 
-  // Saldo Matute Vencido: pagos confirmados hace más de 24hs que aún no fueron enviados
-  const ahora = Date.now();
-  const saldoMatuteVencido = pagos
-    .filter(p => p.estado === 'confirmado')
-    .filter(p => (ahora - new Date(p.created_at).getTime()) > 24 * 3600000)
-    .filter(p => {
-      // Verificar que no haya un envio que cubra este pago
-      return !envios.some(e => new Date(e.created_at) >= new Date(p.created_at));
-    })
-    .reduce((s,p) => s + Number(p.monto), 0);
-
   // Calcular promedio: para cada pago confirmado, buscar el primer envio posterior del cliente
   let tiempos = [];
   pagos.filter(p => p.estado === 'confirmado').forEach(p => {
@@ -632,10 +623,9 @@ async function renderDashboard() {
 
   const c = document.getElementById('main-content');
   c.innerHTML =
-    (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aun no fueron enviados a la empresa.</div></div>' : '') +
-    '<div class="metrics" style="grid-template-columns:repeat(4,1fr);">' +
-    '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido - enviado</div></div>' +
-    '<div class="metric"><div class="metric-label">Saldo Matute Vencido</div><div class="metric-value ' + (saldoMatuteVencido > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoMatuteVencido) + '</div><div class="metric-sub">mas de 24hs sin enviar</div></div>' +
+    (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aún no fueron enviados a la empresa.</div></div>' : '') +
+    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);">' +
+    '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido − enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
     '</div>' +
@@ -654,7 +644,7 @@ async function renderDashboard() {
         '<div class="pago-row" style="padding:10px 18px">' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-released':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>' +
@@ -755,19 +745,6 @@ async function renderControlIntermediario() {
     });
   }
   html += '</div>'; // cierra card envios confirmados
-
-  // Pagos de clientes
-  html += '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
-    (pagos.length === 0 ? '<div class="empty-state">Sin pagos registrados.</div>' :
-      pagos.map(p =>
-        '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' — ' + esc(p.forma_pago) + '</div></div>' +
-        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + esc(p.estado) + '</span>' +
-        '</div>'
-      ).join('')
-    ) + '</div>';
 
   c.innerHTML = html;
 
@@ -912,17 +889,17 @@ async function renderPagosClientes() {
   const pagos = pagRes.data || [];
   const allEnvios = envRes.data || [];
   const c = document.getElementById('main-content');
-  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los pagos informados por clientes</div></div>' +
-    (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aun.</div>' :
+  const estadoLabel = { pendiente: 'Pendiente', confirmado: 'Confirmado' };
+  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los cobros informados por clientes</div></div>' +
+    (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aún.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
         '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + (p.referencia?' - '+esc(p.referencia):'') + '</div></div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + (p.referencia?' · '+esc(p.referencia):'') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + p.estado + '</span>' +
-        calcularDemoraBadge(p, allEnvios) +
-        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Ver comprobante</a>' : '<span style="font-size:11px;color:var(--text3)">Sin comprobante</span>') +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
+        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
         '</div>'
       ).join('')
     ) + '</div>';
@@ -1147,9 +1124,9 @@ async function renderIntHome() {
         '<div class="pago-row">' +
         '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + '</div></div>' +
+        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        (p.comprobante_url ? '<a href="' + esc(p.comprobante_url) + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Ver comprobante</a>' : '') +
+        (p.comprobante_url ? '<a href="' + esc(p.comprobante_url) + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
         '<button class="btn btn-confirm btn-sm" data-id="' + esc(p.id) + '" data-nombre="' + esc(p.profiles?.nombre||'') + '" data-monto="' + Number(p.monto) + '" data-type="btn-conf-cli">Confirmar</button>' +
         '</div>'
       ).join('')
@@ -1194,8 +1171,7 @@ async function renderIntEnviar() {
     '<div class="card"><div class="card-header"><div class="card-title">Registrar envio a la empresa</div></div><div class="form-pad">' +
     '<div class="form-group"><label class="form-label">Monto total enviado</label><input class="form-input" type="number" id="env-monto" placeholder="0.00"/></div>' +
     '<div class="form-group"><label class="form-label">Medio</label><select class="form-select" id="env-medio"><option value="usdt">USDT</option><option value="transferencia">Transferencia bancaria</option><option value="efectivo">Efectivo</option><option value="otro">Otro</option></select></div>' +
-    '<div class="form-group"><label class="form-label">Referencia / Hash (opcional)</label><input class="form-input" id="env-ref" placeholder="Hash de transaccion, numero de referencia..."/></div>' +
-        '<div class="form-group"><label class="form-label">Observaciones (opcional)</label><input class="form-input" id="env-obs" placeholder="Referencia, aclaracion, etc."/></div>' +
+    '<div class="form-group"><label class="form-label">Referencia / Notas (opcional)</label><input class="form-input" id="env-ref" placeholder="Hash, número de transacción, aclaración..."/></div>' +
     '<div class="form-group"><label class="form-label">Detalle por cliente (opcional)</label>' +
     '<div id="lineas-clientes"></div>' +
     '<button class="btn btn-sm" type="button" id="btn-add-linea" style="margin-top:6px">+ Agregar cliente</button>' +
@@ -1339,9 +1315,8 @@ async function registrarEnvio() {
     }
   }
 
-  const obs = document.getElementById('env-obs')?.value || '';
   const { data: envio, error } = await db.from('envios_intermediario')
-    .insert({ monto_total: monto, medio, referencia: ref, notas: obs, comprobante_url, pagador_id: currentUser.id })
+    .insert({ monto_total: monto, medio, referencia: ref, notas: ref, comprobante_url, pagador_id: currentUser.id })
     .select().single();
   if (error) {
     alert('Error al registrar: ' + error.message);
@@ -1420,9 +1395,9 @@ async function renderIntHistorial(desde, hasta) {
     (pagos.length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
       pagos.map(p =>
         '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' - ' + esc(p.forma_pago) + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + esc(p.estado) + '</span>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>';
@@ -1581,17 +1556,35 @@ async function renderComisionEmpresa(year, month) {
 async function renderCliHome() {
   const { data: pagos } = await db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false });
 
+  const lista = pagos || [];
+  const totalInformado = lista.reduce((s,p) => s + Number(p.monto), 0);
+  const confirmados = lista.filter(p => p.estado === 'confirmado').length;
+  const pendientes = lista.filter(p => p.estado === 'pendiente').length;
+
   const c = document.getElementById('main-content');
   let html =
-    '<div class="card"><div class="card-header"><div class="card-title">Mis pagos informados</div><button class="btn btn-primary btn-sm" onclick="loadView(\'cli-pagar\')">+ Informar pago</button></div>' +
-    (!(pagos||[]).length ? '<div class="empty-state">No has informado pagos aun.</div>' :
-      pagos.map(p =>
-        '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">Pago del ' + new Date(p.created_at).toLocaleDateString('es-AR') + '</div><div class="pago-sub">' + esc(p.forma_pago) + (p.referencia?' - '+esc(p.referencia):'') + ' - registrado ' + new Date(p.created_at).toLocaleTimeString('es-AR') + '</div></div>' +
-        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Esperando confirmacion') + '</span>' +
-        '</div>'
-      ).join('')
+    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+    '<div class="metric"><div class="metric-label">Total informado</div><div class="metric-value">USD ' + fmt(totalInformado) + '</div><div class="metric-sub">' + lista.length + ' pago' + (lista.length!==1?'s':'') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Confirmados</div><div class="metric-value ok">' + confirmados + '</div><div class="metric-sub">por el intermediario</div></div>' +
+    '<div class="metric"><div class="metric-label">En espera</div><div class="metric-value ' + (pendientes>0?'danger':'') + '">' + pendientes + '</div><div class="metric-sub">sin confirmar aún</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="card-header"><div class="card-title">Mis pagos</div><button class="btn btn-primary btn-sm" onclick="loadView(\'cli-pagar\')">+ Informar pago</button></div>' +
+    (lista.length === 0 ? '<div class="empty-state">No informaste pagos aún.<br/><br/><button class="btn btn-primary" onclick="loadView(\'cli-pagar\')">Informar primer pago</button></div>' :
+      lista.map(p => {
+        const confirmado = p.estado === 'confirmado';
+        return '<div class="pago-row">' +
+          '<div class="pago-info">' +
+          '<div class="pago-name">' + esc(p.forma_pago.charAt(0).toUpperCase()+p.forma_pago.slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') + '</div>' +
+          '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div>' +
+          '</div>' +
+          '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+          (confirmado
+            ? '<span class="badge badge-released">✓ Confirmado</span>'
+            : '<span class="badge badge-pending">⏳ En espera</span>'
+          ) +
+          (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
+          '</div>';
+      }).join('')
     ) + '</div>';
 
   c.innerHTML = html;
@@ -1759,10 +1752,7 @@ async function renderCliPagar() {
   const c = document.getElementById('main-content');
   c.innerHTML =
     '<div class="card"><div class="card-header"><div class="card-title">Informar un pago al intermediario</div></div><div class="form-pad">' +
-    '<div class="grid-2">' +
     '<div class="form-group"><label class="form-label">Monto pagado (USD)</label><input class="form-input" type="number" id="cp-monto" placeholder="0.00"/></div>' +
-    '<div class="form-group"><label class="form-label">Fecha del pago</label><input class="form-input" type="date" id="cp-fecha"/></div>' +
-    '</div>' +
     '<div class="form-group"><label class="form-label">Forma de pago</label><select class="form-select" id="cp-forma"><option value="efectivo">Efectivo</option><option value="usdt">USDT</option><option value="cheque">Cheque</option><option value="transferencia">Transferencia</option><option value="otro">Otro</option></select></div>' +
     '<div class="form-group"><label class="form-label">Referencia (opcional)</label><input class="form-input" id="cp-ref" placeholder="Numero de transaccion, hash, etc."/></div>' +
     '<div class="upload-zone" onclick="document.getElementById(\'cp-file\').click()"><div class="upload-icon">^</div>Subir comprobante<div class="upload-hint">foto, PDF, captura - max 5MB</div><input type="file" id="cp-file" style="display:none" accept="image/*,.pdf"/></div>' +
@@ -1785,12 +1775,11 @@ async function renderCliPagar() {
 
 async function informarPago() {
   const monto = parseFloat(document.getElementById('cp-monto').value);
-  const fecha = document.getElementById('cp-fecha').value;
   const forma = document.getElementById('cp-forma').value;
   const ref = document.getElementById('cp-ref').value;
   const fileInput = document.getElementById('cp-file');
   const file = fileInput?.files[0];
-  if (!monto || !fecha) { alert('Completa monto y fecha.'); return; }
+  if (!monto) { alert('Ingresá el monto.'); return; }
 
   const btn = document.querySelector('[onclick="informarPago()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
@@ -1805,7 +1794,7 @@ async function informarPago() {
     comprobante_url = urlData.publicUrl;
   }
 
-  const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, comprobante_url, estado: 'pendiente' });
+  const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: new Date().toISOString().split('T')[0], forma_pago: forma, referencia: ref, comprobante_url, estado: 'pendiente' });
   if (error) { alert('Error al registrar: ' + error.message); if (btn) { btn.disabled = false; btn.textContent = 'Enviar informe de pago'; } return; }
 
   notifyEmail('nuevo_pago', { monto, clienteNombre: currentProfile.nombre, comprobanteUrl: comprobante_url });
