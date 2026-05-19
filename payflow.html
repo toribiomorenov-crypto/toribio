@@ -1141,26 +1141,77 @@ async function renderClientes() {
 async function importarClientes(input) {
   const file = input.files[0];
   if (!file) return;
+
+  // Mostrar estado de carga
+  const btn = document.getElementById('btn-import-excel');
+  const originalText = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = 'Procesando...'; btn.disabled = true; }
+
   const reader = new FileReader();
-  reader.onload = async (e) => {
-    const wb = XLSX.read(e.target.result, { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-    const header = (rows[0]||[]).map(h => String(h).toLowerCase().trim());
-    const colCod = header.findIndex(h => h.includes('cod') || h.includes('codigo') || h === 'id');
-    const colNom = header.findIndex(h => h.includes('nom') || h.includes('razon') || h.includes('cliente'));
-    if (colNom === -1) { alert('No se encontro columna de nombre en el Excel.'); return; }
-    const clientes = rows.slice(1)
-      .filter(r => r[colNom])
-      .map(r => ({ nombre: String(r[colNom]).trim(), codigo: colCod >= 0 ? String(r[colCod]||'').trim() : '' }))
-      .filter(c => c.nombre.length > 1);
-    if (!clientes.length) { alert('No se encontraron clientes en el archivo.'); return; }
-    if (!confirm('¿Confirmas importar ' + clientes.length + ' clientes? Los registros existentes con el mismo nombre serán sobreescritos.')) { input.value = ''; return; }
-    const { error } = await db.from('clientes_importados').upsert(clientes, { onConflict: 'nombre' });
-    if (error) { alert('Error al importar: ' + error.message); return; }
-    alert(clientes.length + ' clientes importados correctamente.');
+  reader.onerror = function() {
+    if (btn) { btn.textContent = originalText; btn.disabled = false; }
+    alert('Error al leer el archivo. Asegurate de que sea un archivo Excel válido (.xlsx o .xls).');
     input.value = '';
-    await renderClientes();
+  };
+  reader.onload = async (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array' });
+      if (!wb.SheetNames.length) { alert('El archivo Excel no tiene hojas.'); return; }
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      if (!rows.length || rows.length < 2) {
+        alert('El archivo está vacío o solo tiene encabezados.');
+        return;
+      }
+
+      // Detección de columna nombre: busca en fila de encabezado
+      const header = (rows[0]||[]).map(h => String(h).toLowerCase().trim());
+      const colNom = header.findIndex(h =>
+        h.includes('nom') || h.includes('razon') || h.includes('cliente') ||
+        h.includes('name') || h === 'n' || h === 'descripcion'
+      );
+      const colCod = header.findIndex(h =>
+        h.includes('cod') || h.includes('codigo') || h === 'id' || h.includes('cuit') || h.includes('rut')
+      );
+
+      // Si no hay encabezado reconocible, asumir columna 0 = nombre
+      const usarColNom = colNom >= 0 ? colNom : 0;
+      const usarColCod = colCod >= 0 ? colCod : -1;
+
+      const clientes = rows.slice(1)
+        .filter(r => r[usarColNom] && String(r[usarColNom]).trim().length > 1)
+        .map(r => ({
+          nombre: String(r[usarColNom]).trim(),
+          codigo: usarColCod >= 0 ? String(r[usarColCod]||'').trim() : ''
+        }));
+
+      if (!clientes.length) {
+        alert('No se encontraron clientes en el archivo.\n\nEl archivo debe tener al menos una columna con nombres. Fila de encabezados detectada: ' + (header.join(', ') || '(vacía)'));
+        return;
+      }
+
+      if (!confirm('¿Confirmás importar ' + clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + '?\n\nLos registros con el mismo nombre serán actualizados.')) {
+        input.value = '';
+        return;
+      }
+
+      const { error } = await db.from('clientes_importados').upsert(clientes, { onConflict: 'nombre' });
+      if (error) {
+        alert('Error al guardar en la base de datos:\n' + error.message);
+        return;
+      }
+
+      alert('✓ ' + clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + ' importado' + (clientes.length !== 1 ? 's' : '') + ' correctamente.');
+      input.value = '';
+      await renderClientes();
+
+    } catch(err) {
+      alert('Error al procesar el archivo:\n' + (err.message || String(err)) + '\n\nAsegurate de que sea un archivo Excel (.xlsx o .xls) válido.');
+      input.value = '';
+    } finally {
+      if (btn) { btn.textContent = originalText; btn.disabled = false; }
+    }
   };
   reader.readAsArrayBuffer(file);
 }
