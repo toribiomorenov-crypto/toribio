@@ -1457,14 +1457,20 @@ async function renderComisionEmpresa(year, month) {
   const envios = envRes.data || [];
   const pagosCom = pagosComRes.data || [];
 
-  // FIFO: el total enviado y confirmado cubre los pagos de más viejo a más nuevo
-  const totalEnviado = envios.reduce((s,e) => s + Number(e.monto_total), 0);
-  let saldoRestante = totalEnviado;
+  // FIFO + 24hs: mismo algoritmo que la vista del intermediario
+  const enviosConf = (envios || [])
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+
+  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
   let items = [];
-  pagos.forEach(p => {
+  pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
-    if (saldoRestante >= monto) {
-      saldoRestante -= monto;
+    const fechaPago = new Date(p.created_at);
+    const deadline = new Date(fechaPago.getTime() + 24 * 3600000);
+    const envio = enviosConf.find(e => e.fecha >= fechaPago && e.fecha <= deadline && e.disponible >= monto);
+    if (envio) {
+      envio.disponible -= monto;
       items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001 });
     }
   });
@@ -1595,22 +1601,34 @@ async function renderIntComision(year, month) {
   ]);
 
   const pagos = pagRes.data || [];
-  const envios = envRes.data || [];
 
-  // FIFO: el total enviado y confirmado cubre los pagos de más viejo a más nuevo
-  const totalEnviado = envios.reduce((s,e) => s + Number(e.monto_total), 0);
-  let saldoRestante = totalEnviado;
+  // FIFO + 24hs: cada envío confirmado cubre los pagos más viejos primero,
+  // pero solo los pagos que ocurrieron dentro de las 24hs anteriores al envío.
+  const enviosConf = (envRes.data || [])
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+
+  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  const ahora = Date.now();
   let totalCalifica = 0;
   let detalleComision = [];
 
-  pagos.forEach(p => {
+  pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
-    if (saldoRestante >= monto) {
-      saldoRestante -= monto;
+    const fechaPago = new Date(p.created_at);
+    const deadline = new Date(fechaPago.getTime() + 24 * 3600000);
+
+    // Buscar el primer envío dentro de la ventana de 24hs con saldo disponible suficiente
+    const envio = enviosConf.find(e => e.fecha >= fechaPago && e.fecha <= deadline && e.disponible >= monto);
+
+    if (envio) {
+      envio.disponible -= monto;
       totalCalifica += monto;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001 });
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
     } else {
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0 });
+      // Determinar si todavía está dentro de la ventana o ya venció
+      const vencio = ahora > deadline.getTime();
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
     }
   });
 
@@ -1637,7 +1655,9 @@ async function renderIntComision(year, month) {
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
-          : '<span class="badge badge-late">Pendiente</span>'
+          : d.estado === 'vencido'
+            ? '<span class="badge badge-late" title="Pasaron más de 24hs sin envío">No califica</span>'
+            : '<span class="badge badge-pending">Pendiente</span>'
         ) +
         '</div>'
       ).join('')
