@@ -1722,7 +1722,7 @@ async function informarPago() {
   const { error } = await db.from('pagos_cliente').insert({ cliente_profile_id: currentUser.id, monto, fecha_pago: fecha, forma_pago: forma, referencia: ref, comprobante_url, estado: 'pendiente' });
   if (error) { alert('Error al registrar: ' + error.message); if (btn) { btn.disabled = false; btn.textContent = 'Enviar informe de pago'; } return; }
 
-  notifyEmail('nuevo_pago', { monto, clienteNombre: currentProfile.nombre });
+  notifyEmail('nuevo_pago', { monto, clienteNombre: currentProfile.nombre, comprobanteUrl: comprobante_url });
 
   const msg = document.getElementById('cp-msg');
   msg.textContent = 'Pago informado correctamente. El intermediario lo confirmara a la brevedad.';
