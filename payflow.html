@@ -1466,9 +1466,9 @@ async function renderComisionEmpresa(year, month) {
   let items = [];
   pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
-    const fechaPago = new Date(p.created_at);
-    const deadline = new Date(fechaPago.getTime() + 24 * 3600000);
-    const envio = enviosConf.find(e => e.fecha >= fechaPago && e.fecha <= deadline && e.disponible >= monto);
+    const fechaRef = new Date(p.confirmado_at || p.created_at);
+    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
+    const envio = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
     if (envio) {
       envio.disponible -= monto;
       items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001 });
@@ -1615,20 +1615,20 @@ async function renderIntComision(year, month) {
 
   pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
-    const fechaPago = new Date(p.created_at);
-    const deadline = new Date(fechaPago.getTime() + 24 * 3600000);
+    // La ventana de 24hs arranca desde que el INTERMEDIARIO confirmó el pago (no desde que el cliente lo informó)
+    const fechaRef = new Date(p.confirmado_at || p.created_at);
+    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
 
     // Buscar el primer envío dentro de la ventana de 24hs con saldo disponible suficiente
-    const envio = enviosConf.find(e => e.fecha >= fechaPago && e.fecha <= deadline && e.disponible >= monto);
+    const envio = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
 
     if (envio) {
       envio.disponible -= monto;
       totalCalifica += monto;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, confirmado_at: p.confirmado_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
     } else {
-      // Determinar si todavía está dentro de la ventana o ya venció
       const vencio = ahora > deadline.getTime();
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, confirmado_at: p.confirmado_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
     }
   });
 
@@ -1651,7 +1651,7 @@ async function renderIntComision(year, month) {
       detalleComision.map(d =>
         '<div class="pago-row">' +
         '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
-        '<div class="pago-sub">' + new Date(d.fecha).toLocaleString('es-AR') + '</div></div>' +
+        '<div class="pago-sub">Confirmado: ' + new Date(d.confirmado_at || d.fecha).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
