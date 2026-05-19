@@ -1608,7 +1608,7 @@ async function renderComisionEmpresa(year, month) {
     }
     if (cubierto > 0) {
       const esFull = cubierto >= monto - 0.001;
-      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.0001, estado: esFull ? 'califica' : 'parcial', forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
+      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
     }
   });
 
@@ -1830,7 +1830,7 @@ async function renderIntComision(year, month) {
     if (cubierto > 0) {
       const esFull = cubierto >= monto - 0.001;
       totalComisionBase += cubierto;
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.0001, estado: esFull ? 'califica' : 'parcial', ...extra });
+      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', ...extra });
       return;
     }
 
@@ -1853,7 +1853,7 @@ async function renderIntComision(year, month) {
     detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
   });
 
-  const comisionTotal = totalComisionBase * 0.0001;
+  const comisionTotal = totalComisionBase * 0.001;
   const isMesActualInt = year === now.getFullYear() && month === now.getMonth();
   const c = document.getElementById('main-content');
   c.innerHTML =
@@ -1865,7 +1865,7 @@ async function renderIntComision(year, month) {
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Monto cubierto</div><div class="metric-value">USD ' + fmt(totalComisionBase) + '</div><div class="metric-sub">total o parcialmente enviado</div></div>' +
-    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto cubierto</div></div>' +
+    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,1%</div><div class="metric-sub">por monto cubierto</div></div>' +
     '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
