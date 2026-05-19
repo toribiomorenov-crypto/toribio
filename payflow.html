@@ -350,9 +350,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       </div>
     </div>
     <div class="form-group">
-      <label class="form-label">Email real (para notificaciones)</label>
-      <input class="form-input" type="email" id="nu-email-notif" placeholder="ej: juan@empresa.com (opcional)"/>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">Si se completa, recibirá notificaciones por email.</div>
+      <label class="form-label">Email <span style="color:var(--red)">*</span></label>
+      <input class="form-input" type="email" id="nu-email-notif" placeholder="ej: juan@empresa.com"/>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Necesario para notificaciones y recuperación de contraseña.</div>
     </div>
     <div class="form-group">
       <label class="form-label">Rol</label>
@@ -2126,7 +2126,9 @@ async function crearUsuario() {
   const errEl = document.getElementById('modal-error');
   const btnCrear = document.querySelector('#modal-crear-usuario .btn-primary');
   errEl.style.display = 'none';
-  if (!nombre || !usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  if (!nombre || !usuario || !pass) { showErr(errEl, 'Completá todos los campos obligatorios.'); return; }
+  if (!emailNotif) { showErr(errEl, 'El email es obligatorio (se usa para notificaciones y recuperar contraseña).'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNotif)) { showErr(errEl, 'El email no tiene un formato válido.'); return; }
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
   if (btnCrear) { btnCrear.disabled = true; btnCrear.textContent = 'Creando...'; }
   try {
