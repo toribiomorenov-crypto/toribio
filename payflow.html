@@ -668,16 +668,19 @@ function buildSidebar(rol) {
       { id:'comision-empresa', label:'Comisión' },
       { id:'clientes', label:'Clientes' },
       { id:'usuarios', label:'Usuarios' },
+      { id:'ayuda', label:'Ayuda' },
     ],
     pagador: [
       { id:'int-home', label:'Pagos recibidos' },
       { id:'int-enviar', label:'Enviar a empresa' },
       { id:'int-historial', label:'Mi historial' },
       { id:'int-comision', label:'Mi comisión' },
+      { id:'ayuda', label:'Ayuda' },
     ],
     cliente: [
       { id:'cli-home', label:'Mi cuenta' },
       { id:'cli-pagar', label:'Informar pago' },
+      { id:'ayuda', label:'Ayuda' },
     ],
   };
   const items = menus[rol] || [];
@@ -685,7 +688,7 @@ function buildSidebar(rol) {
     'dashboard':'⊞','control-intermediario':'📊','pagos-clientes':'💳',
     'comision-empresa':'💰','clientes':'👥','usuarios':'⚙️',
     'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰',
-    'cli-home':'🏠','cli-pagar':'💸'
+    'cli-home':'🏠','cli-pagar':'💸','ayuda':'❓'
   };
   nav.innerHTML = '<div class="nav-label">' + esc(rol) + '</div>' +
     items.map(i => '<div class="nav-item" id="nav-' + esc(i.id) + '" onclick="loadView(\'' + esc(i.id) + '\')"><span class="nav-dot"></span>' + esc(i.label) + '</div>').join('');
@@ -729,11 +732,12 @@ async function loadView(id) {
     'int-comision': ['Mi comisión', ''],
     'cli-home': ['Mi cuenta', ''],
     'cli-pagar': ['Informar pago', ''],
+    'ayuda': ['Ayuda', ''],
   };
   const [title, sub] = titles[id] || ['Panel', ''];
   document.getElementById('page-title').textContent = title;
 
-  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar, 'ayuda': renderAyuda };
   if (views[id]) await views[id]();
 }
 
@@ -2215,6 +2219,171 @@ function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 document.getElementById('btn-forgot-submit').addEventListener('click', solicitarResetPass);
 document.getElementById('forgot-usuario').addEventListener('keydown', e => { if (e.key === 'Enter') solicitarResetPass(); });
+
+// ── AYUDA ──
+function renderAyuda() {
+  const rol = currentProfile?.rol || 'empresa';
+  const c = document.getElementById('main-content');
+
+  const s = (titulo, items) =>
+    '<div class="card" style="margin-bottom:16px">' +
+    '<div class="card-header"><div class="card-title" style="font-size:13px;font-weight:600">' + titulo + '</div></div>' +
+    '<div style="padding:0">' +
+    items.map(([icono, pregunta, respuesta]) =>
+      '<div style="padding:14px 18px;border-bottom:1px solid var(--border);last-child:border-none">' +
+      '<div style="display:flex;gap:10px;align-items:flex-start">' +
+      '<span style="font-size:18px;flex-shrink:0;line-height:1.4">' + icono + '</span>' +
+      '<div>' +
+      '<div style="font-size:13px;font-weight:500;color:var(--text);margin-bottom:4px">' + pregunta + '</div>' +
+      '<div style="font-size:12.5px;color:var(--text2);line-height:1.65">' + respuesta + '</div>' +
+      '</div></div></div>'
+    ).join('') +
+    '</div></div>';
+
+  const tip = (msg) =>
+    '<div style="background:var(--blue-bg);border:1px solid var(--blue-border);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;font-size:12.5px;color:var(--blue);display:flex;gap:10px;align-items:flex-start">' +
+    '<span style="font-size:16px;flex-shrink:0">💡</span><span>' + msg + '</span></div>';
+
+  if (rol === 'empresa') {
+    c.innerHTML =
+      '<div style="margin-bottom:20px">' +
+      '<div style="font-size:22px;font-weight:600;margin-bottom:6px">Guía de uso — Empresa</div>' +
+      '<div style="font-size:13px;color:var(--text2)">Todo lo que necesitás saber para operar PayFlow desde el perfil administrador.</div>' +
+      '</div>' +
+
+      s('📋 Visión general', [
+        ['🏢', '¿Qué es PayFlow?',
+          'PayFlow es una plataforma que te permite gestionar los cobros de tus clientes a través de un intermediario (pagador). Los clientes informan sus pagos, el intermediario los recibe y los envía a vos. PayFlow lleva el registro de todo y calcula la comisión del intermediario automáticamente.'],
+        ['👥', '¿Quiénes participan?',
+          '<strong>Empresa (vos):</strong> ves todo, confirmás los envíos del intermediario, gestionás usuarios y comisiones.<br/><strong>Intermediario (pagador):</strong> recibe el dinero de los clientes y lo envía a la empresa.<br/><strong>Cliente:</strong> informa su pago con comprobante desde su portal.'],
+        ['🔄', '¿Cómo es el flujo completo?',
+          '1. El cliente informa un pago desde su portal (monto + comprobante).<br/>2. El intermediario confirma que recibió el dinero.<br/>3. El intermediario envía el dinero a la empresa y registra el envío.<br/>4. Vos confirmás el envío recibido.<br/>5. PayFlow calcula la comisión automáticamente.'],
+      ]) +
+
+      s('⚙️ Usuarios', [
+        ['➕', '¿Cómo creo un usuario?',
+          'Andá a <strong>Usuarios → Crear usuario</strong>. Completá nombre, usuario, contraseña y perfil (pagador o cliente). El usuario va a poder ingresar de inmediato. Si querés que cambie la contraseña al primer login, activá la opción correspondiente.'],
+        ['📧', '¿Para qué sirve el email de notificaciones?',
+          'Cada usuario puede tener un email donde recibe avisos: nuevos pagos, confirmaciones, envíos. No es el email de login (el login usa @payflow.local internamente), sino el email real de la persona.'],
+        ['🔑', '¿Qué pasa si un usuario olvidó su contraseña?',
+          'Desde la pantalla de login hay un link <em>"¿Olvidaste tu contraseña?"</em>. El usuario ingresa su nombre de usuario y, si tiene email registrado, recibe un link para resetear. También podés cambiarla vos desde <strong>Usuarios</strong>.'],
+      ]) +
+
+      s('💳 Cobros de clientes', [
+        ['📥', '¿Dónde veo los pagos que informaron los clientes?',
+          'En <strong>Cobros de clientes</strong> ves todos los pagos informados, con estado, monto, comprobante y fecha. Los pagos empiezan como <em>Pendiente</em> y pasan a <em>Confirmado</em> cuando el intermediario los acepta.'],
+        ['✅', '¿Qué significa "Confirmado"?',
+          'El intermediario revisó el pago del cliente y confirmó que el dinero está en su poder. A partir de ahí el saldo del intermediario sube y la ventana de 24 hs para comisión empieza a correr.'],
+        ['❌', '¿Un cliente puede cancelar un pago?',
+          'Sí, siempre que esté en estado <em>Pendiente</em> (antes de que lo confirme el intermediario). Una vez confirmado, el pago no se puede cancelar.'],
+      ]) +
+
+      s('📊 Intermediario', [
+        ['💼', '¿Qué es el saldo "en poder del intermediario"?',
+          'Es la diferencia entre lo que los clientes informaron (y el intermediario confirmó) menos lo que el intermediario ya envió a la empresa. Es lo que todavía tiene en su poder.'],
+        ['📤', '¿Cómo confirmo un envío?',
+          'En <strong>Intermediario → Envíos pendientes de confirmar</strong> aparecen los envíos que el pagador registró. Al confirmarlo, ese monto queda registrado como enviado y se actualiza el saldo.'],
+        ['📎', '¿Puedo ver el comprobante de un envío?',
+          'Sí. En la lista de envíos confirmados podés expandir cada fila y ver el comprobante adjunto, la forma de pago y la referencia.'],
+      ]) +
+
+      s('💰 Comisión del intermediario', [
+        ['🧮', '¿Cómo se calcula la comisión?',
+          'La tasa es del <strong>0,1%</strong> sobre el monto que el intermediario cubrió dentro de las <strong>24 horas</strong> siguientes a que el cliente informó el pago. Si cubrió el total → califica al 100%. Si cubrió solo una parte → califica sobre esa parte (<em>Parcial</em>). Si no cubrió nada en 24 hs → no califica.'],
+        ['⏱️', '¿Qué es la ventana de 24 horas?',
+          'Cada pago de cliente que el intermediario confirmó abre una ventana de 24 hs. Si durante ese plazo el intermediario registra (y vos confirmás) un envío suficiente, ese pago genera comisión. El algoritmo es FIFO: los envíos cubren los pagos en orden cronológico.'],
+        ['🟡', '¿Qué significa el estado "Parcial"?',
+          'El intermediario envió menos de lo que el cliente informó dentro de las 24 hs. La comisión se calcula sobre lo que sí cubrió. Por ejemplo: pago de USD 100, envío de USD 90 → comisión sobre USD 90 = USD 0,09.'],
+        ['💵', '¿Cómo registro que pagué la comisión?',
+          'En <strong>Comisión → Registrar pago de comisión</strong> podés anotar el monto pagado y la fecha. Eso queda en el historial y descuenta del saldo pendiente.'],
+      ]) +
+
+      tip('El Excel de comisión te muestra el desglose completo por pago, con monto cubierto, estado y comisión individual. Ideal para compartir con el intermediario.');
+
+  } else if (rol === 'pagador') {
+    c.innerHTML =
+      '<div style="margin-bottom:20px">' +
+      '<div style="font-size:22px;font-weight:600;margin-bottom:6px">Guía de uso — Intermediario</div>' +
+      '<div style="font-size:13px;color:var(--text2)">Entendé tu rol, cómo confirmar pagos y cuándo te conviene enviar el dinero.</div>' +
+      '</div>' +
+
+      s('📋 Tu rol', [
+        ['🤝', '¿Qué hacés como intermediario?',
+          'Recibís el dinero de los clientes, lo acumulás y lo enviás a la empresa. PayFlow te lleva el registro de todo: qué recibiste, qué enviaste y qué tenés pendiente de enviar.'],
+        ['🔄', '¿Cómo es el flujo?',
+          '1. Un cliente informa un pago en el sistema.<br/>2. Vos lo confirmás (verificás que el dinero llegó a vos).<br/>3. Cuando enviás el dinero a la empresa, lo registrás en PayFlow con el monto y el comprobante.<br/>4. La empresa confirma que lo recibió.<br/>5. Si lo enviaste dentro de las 24 hs de cada pago, generás comisión.'],
+      ]) +
+
+      s('📥 Pagos recibidos', [
+        ['👀', '¿Dónde veo los pagos que informaron los clientes?',
+          'En <strong>Pagos recibidos</strong>. Ahí ves todos los pagos con estado <em>Pendiente</em> que están esperando tu confirmación.'],
+        ['✅', '¿Cómo confirmo un pago?',
+          'Hacé clic en <strong>Confirmar recepción</strong> en el pago correspondiente. Esto le avisa a la empresa que ya tenés el dinero y activa la ventana de 24 hs para comisión.'],
+        ['⚠️', '¿Qué pasa si confirmo un pago que no recibí?',
+          'Ese monto queda registrado como "en tu poder". Si después no lo enviás a la empresa, queda como deuda pendiente. Confirmá solo los pagos que efectivamente recibiste.'],
+      ]) +
+
+      s('📤 Enviar a la empresa', [
+        ['💸', '¿Cuándo y cómo registro un envío?',
+          'Cuando transferís dinero a la empresa, entrá a <strong>Enviar a empresa</strong>, ingresá el monto total enviado, la forma de pago, la referencia y el comprobante. No necesitás detallar de qué cliente es el dinero — el sistema lo asigna automáticamente.'],
+        ['📎', '¿Es obligatorio subir comprobante?',
+          'No es obligatorio, pero es muy recomendable. El comprobante le da visibilidad a la empresa para confirmar más rápido.'],
+        ['🕐', '¿Puedo hacer varios envíos en el día?',
+          'Sí. Podés registrar tantos envíos como quieras. Cada uno se procesa por separado en el algoritmo de comisión.'],
+      ]) +
+
+      s('💰 Mi comisión', [
+        ['🧮', '¿Cómo gano comisión?',
+          'Ganás el <strong>0,1%</strong> del dinero que enviás a la empresa dentro de las <strong>24 horas</strong> siguientes a que cada cliente informó su pago. El sistema usa FIFO: los envíos cubren los pagos más antiguos primero.'],
+        ['⏱️', 'La ventana de 24 horas — ¿desde cuándo corre?',
+          'Desde el momento exacto en que el cliente informó el pago (no desde que vos lo confirmaste). Por ejemplo, si un cliente informó un pago el lunes a las 10:00, tenés hasta el martes a las 10:00 para enviar ese monto a la empresa y que genere comisión.'],
+        ['🟡', '¿Qué significa "Parcial"?',
+          'Enviaste menos del monto total de ese pago dentro de las 24 hs. La comisión se calcula sobre lo que sí cubriste. Siempre es mejor que nada.'],
+        ['🟠', '¿Qué significa "Enviado · sin confirmar"?',
+          'Registraste un envío que cubre ese pago, pero la empresa todavía no lo confirmó. Una vez que lo confirmen, el estado cambia a <em>Califica</em> o <em>Parcial</em>.'],
+        ['🔴', '¿Qué significa "No califica"?',
+          'Pasaron las 24 hs desde que el cliente informó el pago y no hubo ningún envío confirmado que lo cubriera. Ese pago ya no genera comisión.'],
+      ]) +
+
+      tip('Para maximizar tu comisión: confirmá los pagos de clientes ni bien los recibís, y enviá el dinero a la empresa lo antes posible. Cuanto antes enviás, más pagos podés cubrir dentro de la ventana.');
+
+  } else if (rol === 'cliente') {
+    c.innerHTML =
+      '<div style="margin-bottom:20px">' +
+      '<div style="font-size:22px;font-weight:600;margin-bottom:6px">Guía de uso — Cliente</div>' +
+      '<div style="font-size:13px;color:var(--text2)">Cómo informar tus pagos y hacer el seguimiento desde tu portal.</div>' +
+      '</div>' +
+
+      s('📋 Cómo funciona tu portal', [
+        ['🏠', '¿Qué puedo hacer acá?',
+          'Podés informar tus pagos, adjuntar el comprobante y hacer seguimiento del estado. Tu intermediario va a confirmar la recepción y el pago quedará registrado en el sistema.'],
+        ['🔐', '¿Mi información es privada?',
+          'Sí. Solo vos, tu intermediario y la empresa pueden ver tus pagos. No hay información compartida entre clientes.'],
+      ]) +
+
+      s('💸 Informar un pago', [
+        ['📝', '¿Cómo informo un pago?',
+          'Andá a <strong>Informar pago</strong>, ingresá el monto en dólares, elegí la forma de pago (transferencia, efectivo, etc.), agregá una referencia si tenés y subí el comprobante. Luego hacé clic en <strong>Informar pago</strong>.'],
+        ['📎', '¿Es obligatorio subir comprobante?',
+          'No es obligatorio, pero ayuda a que tu intermediario confirme más rápido. Si tenés una captura de pantalla o foto de la transferencia, es buena idea adjuntarla.'],
+        ['🔢', '¿El monto es en dólares?',
+          'Sí, todos los montos en PayFlow son en USD. Si pagaste en otra moneda, consultá con tu intermediario antes de informar el monto.'],
+      ]) +
+
+      s('📊 Estados de tu pago', [
+        ['🟡', '"En espera" — ¿qué significa?',
+          'Tu pago fue informado correctamente y está esperando que el intermediario lo confirme. Esto puede tardar unas horas dependiendo de cuándo revise el sistema.'],
+        ['🟢', '"Confirmado" — ¿qué significa?',
+          'Tu intermediario revisó el comprobante y confirmó que recibió el dinero. El pago quedó registrado correctamente.'],
+        ['❌', '¿Puedo cancelar un pago?',
+          'Sí, pero solo mientras esté en estado <em>En espera</em>. Una vez que el intermediario lo confirme, ya no se puede cancelar. Para cancelar, buscá el pago en <strong>Mi cuenta</strong> y hacé clic en <strong>Cancelar</strong>.'],
+        ['🔁', '¿Puedo informar otro pago si tengo uno pendiente?',
+          'Sí, podés informar varios pagos. Cada uno se procesa de forma independiente.'],
+      ]) +
+
+      tip('Si informaste un pago por error o con un monto equivocado, cancelalo rápido (antes de que el intermediario lo confirme) e informá uno nuevo con el monto correcto.');
+  }
+}
 </script>
 </body>
 </html>
