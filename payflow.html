@@ -30,7 +30,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 /* ── APP ── */
 #app-screen{display:none;min-height:100vh;}
 .shell{display:flex;min-height:100vh;}
-.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:28px 0;flex-shrink:0;display:flex;flex-direction:column;}
+.sidebar{width:220px;background:var(--surface);border-right:1px solid var(--border);padding:28px 0;flex-shrink:0;display:flex;flex-direction:column;height:100vh;position:sticky;top:0;overflow-y:auto;}
 .logo{padding:0 20px 24px;border-bottom:1px solid var(--border);margin-bottom:20px;}
 .logo-mark{font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;}
 .logo-sub{font-size:11px;color:var(--text3);font-family:'DM Mono',monospace;margin-top:2px;}
@@ -599,6 +599,8 @@ async function renderDashboard() {
   const totalEnviadoEmpresa = envios.reduce((s,e) => s + Number(e.monto_total), 0);
   const enPoderIntermediario = totalRecibidoClientes - totalEnviadoEmpresa;
   const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
+  const enviosPendConf = envios.filter(e => e.confirmado !== true);
+  const montoEnviosPend = enviosPendConf.reduce((s,e) => s + Number(e.monto_total), 0);
 
   // Saldo Matute Vencido: pagos confirmados hace más de 24hs que aún no fueron enviados
   const ahora = Date.now();
@@ -607,7 +609,7 @@ async function renderDashboard() {
     .filter(p => (ahora - new Date(p.created_at).getTime()) > 24 * 3600000)
     .filter(p => {
       // Verificar que no haya un envio que cubra este pago
-      return !envios.some(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id) && new Date(e.created_at) >= new Date(p.created_at));
+      return !envios.some(e => new Date(e.created_at) >= new Date(p.created_at));
     })
     .reduce((s,p) => s + Number(p.monto), 0);
 
@@ -617,7 +619,6 @@ async function renderDashboard() {
     const fechaPago = new Date(p.created_at);
     const primerEnvio = envios
       .filter(e => new Date(e.created_at) >= fechaPago)
-      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
       .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
     if (primerEnvio) {
       const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
@@ -638,6 +639,12 @@ async function renderDashboard() {
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
     '</div>' +
+
+    (enviosPendConf.length > 0 ?
+      '<div class="alert alert-danger section-gap" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">' +
+      '<div style="display:flex;align-items:center;gap:10px"><span class="alert-icon">!</span><span><strong>' + enviosPendConf.length + ' envío' + (enviosPendConf.length>1?'s':'') + ' sin confirmar</strong> — USD ' + fmt(montoEnviosPend) + ' pendiente de acreditar</span></div>' +
+      '<button class="btn btn-primary btn-sm" onclick="loadView(\'control-intermediario\')">Confirmar ahora →</button>' +
+      '</div>' : '') +
 
     '<div class="grid-2 section-gap">' +
 
@@ -1112,10 +1119,28 @@ async function renderUsuarios() {
 
 // ── INTERMEDIARIO: HOME ──
 async function renderIntHome() {
-  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','pendiente').order('created_at', { ascending: false });
-  const lista = pagos || [];
+  const [pendRes, confRes, envRes] = await Promise.all([
+    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','pendiente').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('monto').eq('estado','confirmado'),
+    db.from('envios_intermediario').select('monto_total, confirmado').order('created_at', { ascending: false }),
+  ]);
+  const lista = pendRes.data || [];
+  const totalConf = (confRes.data||[]).reduce((s,p) => s+Number(p.monto), 0);
+  const totalEnv = (envRes.data||[]).reduce((s,e) => s+Number(e.monto_total), 0);
+  const saldo = totalConf - totalEnv;
+  const enviosPendConf = (envRes.data||[]).filter(e => e.confirmado !== true);
   const c = document.getElementById('main-content');
+
+  // Métricas
   c.innerHTML =
+    (lista.length > 0 ? '<div class="alert alert-danger" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span class="alert-icon">!</span><strong>' + lista.length + ' pago' + (lista.length>1?'s':'') + ' pendiente' + (lista.length>1?'s':'') + ' de confirmar</strong></div></div>' : '') +
+    (enviosPendConf.length > 0 ? '<div class="alert" style="background:var(--blue-bg,#EFF6FF);border-color:#BFDBFE;color:#1E40AF;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span>📤</span><strong>' + enviosPendConf.length + ' envío' + (enviosPendConf.length>1?'s':'') + ' esperando confirmación de la empresa</strong></div></div>' : '') +
+    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">' +
+    '<div class="metric"><div class="metric-label">Saldo a enviar</div><div class="metric-value ' + (saldo>0?'danger':'ok') + '">USD ' + fmt(saldo) + '</div><div class="metric-sub">confirmado - enviado</div></div>' +
+    '<div class="metric"><div class="metric-label">Pagos a confirmar</div><div class="metric-value ' + (lista.length>0?'danger':'') + '">' + lista.length + '</div><div class="metric-sub">de clientes</div></div>' +
+    '<div class="metric"><div class="metric-label">Envíos pendientes</div><div class="metric-value ' + (enviosPendConf.length>0?'danger':'') + '">' + enviosPendConf.length + '</div><div class="metric-sub">sin confirmar empresa</div></div>' +
+    '</div>' +
+    (saldo > 0 ? '<div style="display:flex;gap:8px;margin-bottom:20px;"><button class="btn btn-primary" onclick="loadView(\'int-enviar\')">📤 Registrar envío</button></div>' : '') +
     '<div class="card"><div class="card-header"><div class="card-title">Pagos a confirmar</div><span class="badge badge-pending">' + lista.length + ' pendientes</span></div>' +
     (lista.length === 0 ? '<div class="empty-state">No hay pagos pendientes de confirmacion.</div>' :
       lista.map(p =>
@@ -1439,7 +1464,6 @@ async function renderComisionEmpresa(year, month) {
     const primerEnvio = envios
       .filter(e => e.confirmado === true)
       .filter(e => new Date(e.created_at) >= fechaPago)
-      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
       .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
     if (!primerEnvio) return;
     const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
@@ -1585,7 +1609,6 @@ async function renderIntComision(year, month) {
     const primerEnvio = envios
       .filter(e => e.confirmado === true)
       .filter(e => new Date(e.created_at) >= fechaPago)
-      .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === p.cliente_profile_id))
       .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
 
     if (!primerEnvio) {
