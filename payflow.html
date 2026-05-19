@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>PayFlow</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231A1814'/><text x='16' y='22' font-family='system-ui,sans-serif' font-size='16' font-weight='700' fill='%23C8E87A' text-anchor='middle'>PF</text></svg>"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -1598,11 +1599,27 @@ async function renderCliHome() {
             : '<span class="badge badge-pending">⏳ En espera</span>'
           ) +
           (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
+          (!confirmado ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-type="btn-cancelar-pago">Cancelar</button>' : '') +
           '</div>';
       }).join('')
     ) + '</div>';
 
   c.innerHTML = html;
+
+  document.querySelectorAll('[data-type="btn-cancelar-pago"]').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      const pid = this.getAttribute('data-pid');
+      if (!confirm('¿Cancelar este pago? Se eliminará y no podrá recuperarse.')) return;
+      this.disabled = true; this.textContent = 'Cancelando...';
+      const { error } = await db.from('pagos_cliente')
+        .delete()
+        .eq('id', pid)
+        .eq('cliente_profile_id', currentUser.id)
+        .eq('estado', 'pendiente');
+      if (error) { alert('Error al cancelar: ' + error.message); this.disabled = false; this.textContent = 'Cancelar'; return; }
+      await renderCliHome();
+    });
+  });
 }
 
 // ── INTERMEDIARIO: COMISION ──
@@ -1960,11 +1977,17 @@ async function cambiarPassObligatorio() {
   const result = await res.json();
   if (result.error) { showErr(errEl, 'Error: ' + result.error); return; }
 
-  // El backend ya limpia force_password_change, pero lo reflejamos en local también
   currentProfile.force_password_change = false;
-
-  document.getElementById('change-pass-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'block';
+  showAppScreen();
+  document.getElementById('sidebar-nombre').textContent = currentProfile.nombre;
+  document.getElementById('sidebar-rol').textContent = currentProfile.rol;
+  const mUN2 = document.getElementById('mobile-user-nombre');
+  if (mUN2) mUN2.textContent = currentProfile.nombre;
+  const initials2 = currentProfile.nombre.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+  const topbarN2 = document.getElementById('topbar-nombre');
+  const topbarI2 = document.getElementById('topbar-initials');
+  if (topbarN2) topbarN2.textContent = currentProfile.nombre;
+  if (topbarI2) topbarI2.textContent = initials2;
   buildSidebar(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
