@@ -1449,7 +1449,7 @@ async function renderComisionEmpresa(year, month) {
 
   const [pagRes, envRes, pagosComRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('monto_total, confirmado').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
@@ -1457,18 +1457,16 @@ async function renderComisionEmpresa(year, month) {
   const envios = envRes.data || [];
   const pagosCom = pagosComRes.data || [];
 
-  // Calculate eligible payments same logic as intermediario view
+  // FIFO: el total enviado y confirmado cubre los pagos de más viejo a más nuevo
+  const totalEnviado = envios.reduce((s,e) => s + Number(e.monto_total), 0);
+  let saldoRestante = totalEnviado;
   let items = [];
   pagos.forEach(p => {
-    const fechaPago = new Date(p.created_at);
-    const primerEnvio = envios
-      .filter(e => e.confirmado === true)
-      .filter(e => new Date(e.created_at) >= fechaPago)
-      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
-    if (!primerEnvio) return;
-    const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
-    if (horas > 24) return; // Only show qualifying ones
-    items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: Number(p.monto), horas: parseFloat(horas.toFixed(1)), comision: Number(p.monto) * 0.0001 });
+    const monto = Number(p.monto);
+    if (saldoRestante >= monto) {
+      saldoRestante -= monto;
+      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001 });
+    }
   });
 
   const totalComision = items.reduce((s,i) => s + i.comision, 0);
@@ -1593,34 +1591,27 @@ async function renderIntComision(year, month) {
 
   const [pagRes, envRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('monto_total, confirmado').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
   ]);
 
   const pagos = pagRes.data || [];
   const envios = envRes.data || [];
 
+  // FIFO: el total enviado y confirmado cubre los pagos de más viejo a más nuevo
+  const totalEnviado = envios.reduce((s,e) => s + Number(e.monto_total), 0);
+  let saldoRestante = totalEnviado;
   let totalCalifica = 0;
   let detalleComision = [];
 
   pagos.forEach(p => {
-    const fechaPago = new Date(p.created_at);
-
-    // Solo envios CONFIRMADOS por la empresa
-    const primerEnvio = envios
-      .filter(e => e.confirmado === true)
-      .filter(e => new Date(e.created_at) >= fechaPago)
-      .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))[0];
-
-    if (!primerEnvio) {
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: p.monto, horas: null, califica: false, comision: 0 });
-      return;
+    const monto = Number(p.monto);
+    if (saldoRestante >= monto) {
+      saldoRestante -= monto;
+      totalCalifica += monto;
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001 });
+    } else {
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0 });
     }
-
-    const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
-    // Comision sobre el monto total del pago del cliente si llego dentro de 24hs
-    const montoCalifica = horas <= 24 ? Number(p.monto) : 0;
-    if (montoCalifica > 0) totalCalifica += montoCalifica;
-    detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto: Number(p.monto), horas: parseFloat(horas.toFixed(1)), califica: horas <= 24, comision: montoCalifica * 0.0001 });
   });
 
   const comisionTotal = totalCalifica * 0.0001;
@@ -1634,7 +1625,7 @@ async function renderIntComision(year, month) {
     '</div>' +
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
-    '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">enviado en menos de 24hs</div></div>' +
+    '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">cubierto por envíos confirmados</div></div>' +
     '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto calificado</div></div>' +
     '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
@@ -1642,11 +1633,11 @@ async function renderIntComision(year, month) {
       detalleComision.map(d =>
         '<div class="pago-row">' +
         '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
-        '<div class="pago-sub">' + (d.horas === null ? 'Aun no enviado' : String(d.horas).replace('.', ',') + 'hs hasta el envio') + '</div></div>' +
+        '<div class="pago-sub">' + new Date(d.fecha).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
-          : '<span class="badge badge-late">' + (d.horas === null ? 'Pendiente' : 'No califica') + '</span>'
+          : '<span class="badge badge-late">Pendiente</span>'
         ) +
         '</div>'
       ).join('')
