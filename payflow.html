@@ -1448,8 +1448,8 @@ async function renderComisionEmpresa(year, month) {
   const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
 
   const [pagRes, envRes, pagosComRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('monto_total, confirmado').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
@@ -1471,7 +1471,7 @@ async function renderComisionEmpresa(year, month) {
     const envio = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
     if (envio) {
       envio.disponible -= monto;
-      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001 });
+      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001, forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
     }
   });
 
@@ -1499,12 +1499,23 @@ async function renderComisionEmpresa(year, month) {
   if (items.length === 0) {
     html += '<div class="empty-state">Sin pagos que califiquen este mes.</div>';
   } else {
-    items.forEach(function(item) {
-      html += '<div class="pago-row">' +
+    items.forEach(function(item, i) {
+      const detailRows =
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(item.forma_pago || '—') + '</div>' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (item.confirmado_at ? new Date(item.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
+        '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(item.referencia || '—') + '</div>' +
+        (item.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + item.comprobante_url + '" target="_blank" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
+        '</div>';
+      html += '<div>' +
+        '<div class="pago-row" style="cursor:pointer" onclick="toggleComisionDetail(\'emp-det-' + i + '\')">' +
         '<div class="pago-info"><div class="pago-name">' + esc(item.cliente) + '</div>' +
-        '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + ' · ' + String(item.horas).replace('.',',') + 'hs hasta envio</div></div>' +
+        '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' +
         '<span class="badge badge-released">Comision: USD ' + fmtDec(item.comision, 2) + '</span>' +
+        '<span style="color:var(--text3);font-size:12px;margin-left:4px;user-select:none" id="arr-emp-' + i + '">›</span>' +
+        '</div>' +
+        '<div id="emp-det-' + i + '" style="display:none;padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border)">' + detailRows + '</div>' +
         '</div>';
     });
   }
@@ -1596,7 +1607,7 @@ async function renderIntComision(year, month) {
   const mesLabel = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
   const [pagRes, envConfRes, envPendRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
     db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
   ]);
@@ -1623,12 +1634,14 @@ async function renderIntComision(year, month) {
     const fechaRef = new Date(p.created_at);
     const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
 
+    const extra = { forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null };
+
     // 1. ¿Hay envío CONFIRMADO dentro de las 24hs con saldo suficiente?
     const envioConf = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
     if (envioConf) {
       envioConf.disponible -= monto;
       totalCalifica += monto;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
+      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica', ...extra });
       return;
     }
 
@@ -1636,13 +1649,13 @@ async function renderIntComision(year, month) {
     const envioPend = enviosPend.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
     if (envioPend) {
       envioPend.disponible -= monto;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: 'sin_confirmar' });
+      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: 'sin_confirmar', ...extra });
       return;
     }
 
     // 3. Sin envío — ¿venció la ventana?
     const vencio = ahora > deadline.getTime();
-    detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
+    detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
   });
 
   const comisionTotal = totalCalifica * 0.0001;
@@ -1661,21 +1674,41 @@ async function renderIntComision(year, month) {
     '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
-      detalleComision.map(d =>
-        '<div class="pago-row">' +
-        '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
-        '<div class="pago-sub">' + new Date(d.fecha).toLocaleString('es-AR') + '</div></div>' +
-        '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
-        (d.califica
+      detalleComision.map((d, i) => {
+        const badge = d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
           : d.estado === 'sin_confirmar'
             ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
             : d.estado === 'vencido'
               ? '<span class="badge badge-late">No califica</span>'
-              : '<span class="badge badge-pending">Pendiente</span>'
-        ) +
-        '</div>'
-      ).join('')
+              : '<span class="badge badge-pending">Pendiente</span>';
+        const deadline24 = new Date(new Date(d.fecha).getTime() + 24*3600000);
+        const estadoDesc = d.califica
+          ? 'Envío confirmado por la empresa dentro de las 24 hs. Comisión: USD ' + fmtDec(d.comision, 2) + '.'
+          : d.estado === 'sin_confirmar'
+            ? 'El intermediario registró un envío dentro de las 24 hs, pero la empresa aún no lo confirmó. La comisión quedará pendiente hasta la confirmación.'
+            : d.estado === 'vencido'
+              ? 'No se registró ningún envío dentro de las 24 hs desde que el cliente informó el pago. No califica para comisión.'
+              : 'Ventana de 24 hs abierta hasta ' + deadline24.toLocaleString('es-AR') + '. Aún puede calificar.';
+        const detailRows =
+          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
+          '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(d.forma_pago || '—') + '</div>' +
+          '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (d.confirmado_at ? new Date(d.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
+          '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(d.referencia || '—') + '</div>' +
+          (d.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + d.comprobante_url + '" target="_blank" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
+          '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + estadoDesc + '</div>' +
+          '</div>';
+        return '<div>' +
+          '<div class="pago-row" style="cursor:pointer" onclick="toggleComisionDetail(\'det-' + i + '\')">' +
+          '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
+          '<div class="pago-sub">' + new Date(d.fecha).toLocaleString('es-AR') + '</div></div>' +
+          '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
+          badge +
+          '<span style="color:var(--text3);font-size:12px;margin-left:4px;user-select:none" id="arr-' + i + '">›</span>' +
+          '</div>' +
+          '<div id="det-' + i + '" style="display:none;padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border)">' + detailRows + '</div>' +
+          '</div>';
+      }).join('')
     ) + '</div>';
 
   // Export button
@@ -1683,12 +1716,16 @@ async function renderIntComision(year, month) {
   if (btnExp) {
     btnExp.onclick = function() {
       const rows = [['REPORTE DE COMISION - ' + mesLabel.toUpperCase()], []];
-      rows.push(['Cliente', 'Monto USD', 'Demora (hs)', 'Califica', 'Comision USD']);
+      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Forma de pago', 'Referencia', 'Estado', 'Califica', 'Comision USD']);
       detalleComision.forEach(function(d) {
+        const estadoLabel = d.califica ? 'Califica' : d.estado === 'sin_confirmar' ? 'Enviado sin confirmar' : d.estado === 'vencido' ? 'No califica' : 'Pendiente';
         rows.push([
           d.cliente,
+          new Date(d.fecha).toLocaleString('es-AR'),
           d.monto,
-          d.horas === null ? 'Pendiente' : d.horas,
+          d.forma_pago || '',
+          d.referencia || '',
+          estadoLabel,
           d.califica ? 'Si' : 'No',
           d.califica ? parseFloat(d.comision.toFixed(2)) : 0
         ]);
@@ -1697,7 +1734,7 @@ async function renderIntComision(year, month) {
       rows.push(['TOTAL CALIFICA', totalCalifica, '', '', parseFloat(comisionTotal.toFixed(2))]);
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{wch:30},{wch:14},{wch:14},{wch:10},{wch:14}];
+      ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:24},{wch:22},{wch:10},{wch:14}];
       XLSX.utils.book_append_sheet(wb, ws, 'Comision');
       XLSX.writeFile(wb, 'comision_' + mesLabel.replace(' ','_') + '.xlsx');
     };
@@ -1940,6 +1977,17 @@ function generarPassAleatoria() {
 function esc(str) { return String(str??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmt(n) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDec(n, d) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d}); }
+function toggleComisionDetail(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const idx = id.replace('emp-det-','').replace('det-','');
+  const isEmp = id.startsWith('emp-');
+  const arrId = isEmp ? 'arr-emp-' + idx : 'arr-' + idx;
+  const arr = document.getElementById(arrId);
+  const open = el.style.display === 'none' || el.style.display === '';
+  el.style.display = open ? 'block' : 'none';
+  if (arr) arr.textContent = open ? '⌄' : '›';
+}
 function abrirModal(id) { document.getElementById(id).classList.add('open'); }
 function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
