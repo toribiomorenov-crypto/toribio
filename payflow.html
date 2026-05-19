@@ -1222,14 +1222,20 @@ async function importarClientes(input) {
       finish(); input.value = ''; return;
     }
 
-    if (!confirm('¿Confirmás importar ' + clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + '?\nLos registros con el mismo nombre serán actualizados.')) {
+    // Deduplicar por nombre (el ERP puede exportar duplicados): quedarse con el último
+    const mapaClientes = new Map();
+    clientes.forEach(c => mapaClientes.set(c.nombre.toLowerCase(), c));
+    const clientesUnicos = Array.from(mapaClientes.values());
+
+    if (!confirm('¿Confirmás importar ' + clientesUnicos.length + ' cliente' + (clientesUnicos.length !== 1 ? 's' : '') + '?\nLos registros con el mismo nombre serán actualizados.')) {
       finish(); input.value = ''; return;
     }
 
-    const { error } = await db.from('clientes_importados').upsert(clientes, { onConflict: 'nombre' });
+    const { error } = await db.from('clientes_importados').upsert(clientesUnicos, { onConflict: 'nombre' });
     if (error) { alert('Error al guardar: ' + error.message); finish(); input.value = ''; return; }
 
-    alert('✓ ' + clientes.length + ' cliente' + (clientes.length !== 1 ? 's' : '') + ' importado' + (clientes.length !== 1 ? 's' : '') + ' correctamente.');
+    const dupMsg = clientes.length !== clientesUnicos.length ? '\n(' + (clientes.length - clientesUnicos.length) + ' duplicados ignorados)' : '';
+    alert('✓ ' + clientesUnicos.length + ' cliente' + (clientesUnicos.length !== 1 ? 's' : '') + ' importado' + (clientesUnicos.length !== 1 ? 's' : '') + ' correctamente.' + dupMsg);
     input.value = '';
     await renderClientes();
 
