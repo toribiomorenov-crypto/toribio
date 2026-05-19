@@ -199,6 +199,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <input class="form-input" type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
     </div>
     <button class="btn btn-primary" style="width:100%;padding:10px;" onclick="doLogin()">Ingresar</button>
+    <div style="text-align:center;margin-top:16px;">
+      <span style="font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline;" onclick="showForgotPassScreen()">¿Olvidaste tu contraseña?</span>
+    </div>
   </div>
 </div>
 
@@ -220,6 +223,43 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <input class="form-input" type="password" id="new-pass-2" placeholder="repetir contraseña"/>
     </div>
     <button class="btn btn-primary" style="width:100%;padding:10px;" onclick="cambiarPassObligatorio()">Guardar y continuar</button>
+  </div>
+</div>
+
+<!-- ===== OLVIDE MI CONTRASEÑA ===== -->
+<div id="forgot-pass-screen" style="display:none;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg);">
+  <div class="login-card">
+    <div class="login-logo">PayFlow</div>
+    <div class="login-sub">recuperar contraseña</div>
+    <div class="login-error" id="forgot-error"></div>
+    <div class="success-msg" id="forgot-success"></div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:20px;">Ingresá tu nombre de usuario y si tenés un email registrado, te enviamos un link para restablecer tu contraseña.</p>
+    <div class="form-group">
+      <label class="form-label">Tu usuario</label>
+      <input class="form-input" type="text" id="forgot-usuario" placeholder="tu usuario" autocomplete="username"/>
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;" id="btn-forgot-submit">Enviar link</button>
+    <div style="text-align:center;margin-top:16px;">
+      <span style="font-size:12px;color:var(--text3);cursor:pointer;text-decoration:underline;" onclick="showLoginScreen()">← Volver al login</span>
+    </div>
+  </div>
+</div>
+
+<!-- ===== RESET VIA TOKEN ===== -->
+<div id="reset-token-screen" style="display:none;align-items:center;justify-content:center;min-height:100vh;padding:20px;background:var(--bg);">
+  <div class="login-card">
+    <div class="login-logo">PayFlow</div>
+    <div class="login-sub">nueva contraseña</div>
+    <div class="login-error" id="reset-token-error"></div>
+    <div class="form-group">
+      <label class="form-label">Nueva contraseña</label>
+      <input class="form-input" type="password" id="reset-token-pass1" placeholder="min. 6 caracteres"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirmar contraseña</label>
+      <input class="form-input" type="password" id="reset-token-pass2" placeholder="repetir contraseña"/>
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:10px;" id="btn-reset-token">Guardar contraseña</button>
   </div>
 </div>
 
@@ -356,25 +396,44 @@ let currentProfile = null;
 let realtimeChannel = null;
 
 // ── Helpers de pantalla ──
-function showLoginScreen(errMsg) {
+function hideAllScreens() {
+  ['loading-screen','login-screen','change-pass-screen','app-screen','forgot-pass-screen','reset-token-screen']
+    .forEach(function(id) { document.getElementById(id).style.display = 'none'; });
+}
+function showLoginScreen(errMsg, successMsg) {
   currentUser = null; currentProfile = null;
-  document.getElementById('loading-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'none';
-  document.getElementById('change-pass-screen').style.display = 'none';
+  hideAllScreens();
   document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('login-success').style.display = 'none';
   if (errMsg) showErr(document.getElementById('login-error'), errMsg);
+  if (successMsg) {
+    const el = document.getElementById('login-success');
+    el.textContent = successMsg;
+    el.style.display = 'block';
+  }
 }
 function showAppScreen() {
-  document.getElementById('loading-screen').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('change-pass-screen').style.display = 'none';
+  hideAllScreens();
   document.getElementById('app-screen').style.display = 'block';
 }
 function showChangePassScreen() {
-  document.getElementById('loading-screen').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'none';
+  hideAllScreens();
   document.getElementById('change-pass-screen').style.display = 'flex';
+}
+function showForgotPassScreen() {
+  hideAllScreens();
+  document.getElementById('forgot-pass-screen').style.display = 'flex';
+  document.getElementById('forgot-error').style.display = 'none';
+  document.getElementById('forgot-success').style.display = 'none';
+  document.getElementById('forgot-usuario').value = '';
+  setTimeout(function() { document.getElementById('forgot-usuario').focus(); }, 50);
+}
+function showResetTokenScreen(token) {
+  hideAllScreens();
+  document.getElementById('reset-token-screen').style.display = 'flex';
+  const btn = document.getElementById('btn-reset-token');
+  if (btn) btn.onclick = function() { usarResetToken(token); };
 }
 
 // ── initApp: carga perfil y muestra la app ──
@@ -458,6 +517,15 @@ db.auth.onAuthStateChange(function(event, session) {
 
 // ── Verificar sesion al inicio (UNA sola vez, sin race conditions) ──
 (async function checkInitialSession() {
+  // Si hay token de reset en la URL, mostrar pantalla de nueva contraseña
+  const params = new URLSearchParams(window.location.search);
+  const resetToken = params.get('reset');
+  if (resetToken) {
+    // Limpiar token de la URL sin recargar la página
+    window.history.replaceState({}, document.title, window.location.pathname);
+    showResetTokenScreen(resetToken);
+    return;
+  }
   try {
     const { data: { session } } = await db.auth.getSession();
     if (session && session.user) {
@@ -469,6 +537,61 @@ db.auth.onAuthStateChange(function(event, session) {
     showLoginScreen();
   }
 })();
+
+// ── Solicitar reset de contraseña ──
+async function solicitarResetPass() {
+  const usuario = document.getElementById('forgot-usuario').value.trim().toLowerCase();
+  const errEl = document.getElementById('forgot-error');
+  const successEl = document.getElementById('forgot-success');
+  const btn = document.getElementById('btn-forgot-submit');
+  errEl.style.display = 'none';
+  successEl.style.display = 'none';
+  if (!usuario) { showErr(errEl, 'Ingresá tu nombre de usuario.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
+  try {
+    await fetch(BACKEND_URL + '/api/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: usuario })
+    });
+    // Siempre mostrar éxito (no revelar si el usuario existe)
+    successEl.textContent = 'Si tu usuario tiene un email registrado, recibirás el link en los próximos minutos.';
+    successEl.style.display = 'block';
+  } catch(e) {
+    showErr(errEl, 'Error de conexión. Intentá de nuevo.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Enviar link'; }
+  }
+}
+
+// ── Usar token de reset para cambiar contraseña ──
+async function usarResetToken(token) {
+  const pass1 = document.getElementById('reset-token-pass1').value;
+  const pass2 = document.getElementById('reset-token-pass2').value;
+  const errEl = document.getElementById('reset-token-error');
+  const btn = document.getElementById('btn-reset-token');
+  errEl.style.display = 'none';
+  if (pass1.length < 6) { showErr(errEl, 'La contraseña debe tener al menos 6 caracteres.'); return; }
+  if (pass1 !== pass2) { showErr(errEl, 'Las contraseñas no coinciden.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
+  try {
+    const res = await fetch(BACKEND_URL + '/api/reset-via-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, newPassword: pass1 })
+    });
+    const result = await res.json();
+    if (!res.ok || result.error) {
+      showErr(errEl, result.error || 'El link es inválido o ya expiró. Solicitá uno nuevo.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Guardar contraseña'; }
+      return;
+    }
+    showLoginScreen(null, '✓ Contraseña cambiada correctamente. Ya podés ingresar.');
+  } catch(e) {
+    showErr(errEl, 'Error de conexión. Intentá de nuevo.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar contraseña'; }
+  }
+}
 
 // ── Notificaciones en tiempo real (Supabase Realtime) ──
 function setupRealtime(rol) {
@@ -1149,7 +1272,8 @@ async function renderIntHome() {
 
 async function confirmarPagoCliente(id, nombre, monto) {
   if (!confirm('Confirmar recepcion de USD ' + fmt(monto) + ' de ' + nombre + '?')) return;
-  await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
+  const { error: confErr } = await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
+  if (confErr) { alert('Error al confirmar el pago: ' + confErr.message); return; }
   const { data: s } = await db.auth.getSession();
   const token = s?.session?.access_token;
   fetch(BACKEND_URL + '/api/notify', {
@@ -1246,7 +1370,7 @@ async function agregarLineaCliente() {
     const filtered = q ? profs.filter(p => p.nombre.toLowerCase().includes(q.toLowerCase())) : profs;
     if (!filtered.length) { dropEl.style.display = 'none'; return; }
     dropEl.innerHTML = filtered.map(p =>
-      '<div data-id="' + p.id + '" data-nombre="' + p.nombre.replace(/"/g,'') + '" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border)">' + p.nombre + '</div>'
+      '<div data-id="' + p.id + '" data-nombre="' + esc(p.nombre) + '" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border)">' + esc(p.nombre) + '</div>'
     ).join('');
     dropEl.style.display = 'block';
     dropEl.querySelectorAll('div').forEach(function(item) {
@@ -1290,8 +1414,8 @@ async function registrarEnvio() {
   const medio = document.getElementById('env-medio').value;
   const ref = document.getElementById('env-ref').value;
 
-  if (!monto) {
-    alert('Ingresa el monto total.');
+  if (!monto || monto <= 0) {
+    alert('Ingresa un monto válido mayor a cero.');
     if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
     return;
   }
@@ -1316,7 +1440,12 @@ async function registrarEnvio() {
     const file = fileInput.files[0];
     const ext = file.name.split('.').pop();
     const path = 'envios/' + Date.now() + '.' + ext;
-    const { data: uploaded } = await db.storage.from('comprobantes').upload(path, file);
+    const { data: uploaded, error: upErr } = await db.storage.from('comprobantes').upload(path, file);
+    if (upErr) {
+      alert('Error al subir comprobante: ' + upErr.message);
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
+      return;
+    }
     if (uploaded) {
       const { data: urlData } = db.storage.from('comprobantes').getPublicUrl(path);
       comprobante_url = urlData.publicUrl;
@@ -1344,7 +1473,12 @@ async function registrarEnvio() {
     }
   });
   if (lineas.length > 0) {
-    await db.from('detalle_envio').insert(lineas);
+    const { error: detErr } = await db.from('detalle_envio').insert(lineas);
+    if (detErr) {
+      // El envío se registró pero sin desglose — avisar sin bloquear
+      console.error('[registrarEnvio] Error al guardar detalle:', detErr.message);
+      alert('El envío se registró, pero hubo un error al guardar el desglose por cliente: ' + detErr.message + '\nContactá al administrador.');
+    }
   }
 
   notifyEmail('nuevo_envio', { monto });
@@ -1438,9 +1572,14 @@ async function renderComisionEmpresa(year, month) {
   const primerDia = new Date(year, month, 1).toISOString();
   const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
 
+  // Para el algoritmo FIFO, los envíos pueden cubrir pagos del último día del mes
+  // dentro de las 24hs siguientes (que caen en el mes siguiente). Por eso extendemos
+  // el rango de búsqueda de envíos +24hs más allá del cierre del mes.
+  const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
+
   const [pagRes, envRes, pagosComRes] = await Promise.all([
     db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
+    db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
@@ -1448,7 +1587,7 @@ async function renderComisionEmpresa(year, month) {
   const envios = envRes.data || [];
   const pagosCom = pagosComRes.data || [];
 
-  // FIFO + 24hs: mismo algoritmo que la vista del intermediario
+  // FIFO + 24hs con cobertura parcial: mismo algoritmo que la vista del intermediario
   const enviosConf = (envios || [])
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
     .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
@@ -1459,10 +1598,17 @@ async function renderComisionEmpresa(year, month) {
     const monto = Number(p.monto);
     const fechaRef = new Date(p.created_at);
     const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-    const envio = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
-    if (envio) {
-      envio.disponible -= monto;
-      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, comision: monto * 0.0001, forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
+    let cubierto = 0;
+    for (const e of enviosConf) {
+      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
+      const aplicar = Math.min(monto - cubierto, e.disponible);
+      e.disponible -= aplicar;
+      cubierto += aplicar;
+      if (cubierto >= monto) break;
+    }
+    if (cubierto > 0) {
+      const esFull = cubierto >= monto - 0.001;
+      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.0001, estado: esFull ? 'califica' : 'parcial', forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
     }
   });
 
@@ -1486,24 +1632,31 @@ async function renderComisionEmpresa(year, month) {
     '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
     '</div>';
 
-  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos que califican este mes</div></div>';
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos con cobertura este mes</div></div>';
   if (items.length === 0) {
-    html += '<div class="empty-state">Sin pagos que califiquen este mes.</div>';
+    html += '<div class="empty-state">Sin pagos cubiertos este mes.</div>';
   } else {
     items.forEach(function(item, i) {
+      const badge = item.califica
+        ? '<span class="badge badge-released">Comisión: USD ' + fmtDec(item.comision, 2) + '</span>'
+        : '<span class="badge badge-pending">Parcial: USD ' + fmtDec(item.comision, 2) + '</span>';
+      const coberturaDesc = item.califica
+        ? 'Cubierto totalmente (USD ' + fmt(item.monto) + '). Comisión: USD ' + fmtDec(item.comision, 2) + '.'
+        : 'Cubierto parcialmente: USD ' + fmt(item.montoCubierto) + ' de USD ' + fmt(item.monto) + '. Comisión parcial: USD ' + fmtDec(item.comision, 2) + '.';
       const detailRows =
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(item.forma_pago || '—') + '</div>' +
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (item.confirmado_at ? new Date(item.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
         '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(item.referencia || '—') + '</div>' +
         (item.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + item.comprobante_url + '" target="_blank" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
+        '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + coberturaDesc + '</div>' +
         '</div>';
       html += '<div>' +
         '<div class="pago-row" style="cursor:pointer" onclick="toggleComisionDetail(\'emp-det-' + i + '\')">' +
         '<div class="pago-info"><div class="pago-name">' + esc(item.cliente) + '</div>' +
         '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' +
-        '<span class="badge badge-released">Comision: USD ' + fmtDec(item.comision, 2) + '</span>' +
+        badge +
         '<span style="color:var(--text3);font-size:12px;margin-left:4px;user-select:none" id="arr-emp-' + i + '">›</span>' +
         '</div>' +
         '<div id="emp-det-' + i + '" style="display:none;padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border)">' + detailRows + '</div>' +
@@ -1631,10 +1784,15 @@ async function renderIntComision(year, month) {
   const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
   const mesLabel = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
+  // Para el algoritmo FIFO, los envíos pueden cubrir pagos del último día del mes
+  // dentro de las 24hs siguientes (que caen en el mes siguiente). Por eso extendemos
+  // el rango de búsqueda de envíos +24hs más allá del cierre del mes.
+  const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
+
   const [pagRes, envConfRes, envPendRes] = await Promise.all([
     db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
-    db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
+    db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
+    db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
   ]);
 
   const pagos = pagRes.data || [];
@@ -1651,39 +1809,51 @@ async function renderIntComision(year, month) {
 
   const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
   const ahora = Date.now();
-  let totalCalifica = 0;
+  let totalComisionBase = 0; // suma de montos cubiertos (total o parcialmente)
   let detalleComision = [];
 
   pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
     const fechaRef = new Date(p.created_at);
     const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-
     const extra = { forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null };
 
-    // 1. ¿Hay envío CONFIRMADO dentro de las 24hs con saldo suficiente?
-    const envioConf = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
-    if (envioConf) {
-      envioConf.disponible -= monto;
-      totalCalifica += monto;
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica', ...extra });
+    // 1. Cobertura por envíos CONFIRMADOS (cobertura parcial permitida)
+    let cubierto = 0;
+    for (const e of enviosConf) {
+      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
+      const aplicar = Math.min(monto - cubierto, e.disponible);
+      e.disponible -= aplicar;
+      cubierto += aplicar;
+      if (cubierto >= monto) break;
+    }
+    if (cubierto > 0) {
+      const esFull = cubierto >= monto - 0.001;
+      totalComisionBase += cubierto;
+      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.0001, estado: esFull ? 'califica' : 'parcial', ...extra });
       return;
     }
 
-    // 2. ¿Hay envío SIN CONFIRMAR dentro de las 24hs? (enviado pero empresa no confirmó aún)
-    const envioPend = enviosPend.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
-    if (envioPend) {
-      envioPend.disponible -= monto;
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: 'sin_confirmar', ...extra });
+    // 2. Sin cobertura confirmada — verificar envíos PENDIENTES (sin confirmar)
+    let cubiertoPend = 0;
+    for (const e of enviosPend) {
+      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
+      const aplicar = Math.min(monto - cubiertoPend, e.disponible);
+      e.disponible -= aplicar;
+      cubiertoPend += aplicar;
+      if (cubiertoPend >= monto) break;
+    }
+    if (cubiertoPend > 0) {
+      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: 'sin_confirmar', ...extra });
       return;
     }
 
-    // 3. Sin envío — ¿venció la ventana?
+    // 3. Sin cobertura — ¿venció la ventana?
     const vencio = ahora > deadline.getTime();
-    detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
+    detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
   });
 
-  const comisionTotal = totalCalifica * 0.0001;
+  const comisionTotal = totalComisionBase * 0.0001;
   const isMesActualInt = year === now.getFullYear() && month === now.getMonth();
   const c = document.getElementById('main-content');
   c.innerHTML =
@@ -1694,27 +1864,31 @@ async function renderIntComision(year, month) {
     '</div>' +
     '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
-    '<div class="metric"><div class="metric-label">Monto que califica</div><div class="metric-value">USD ' + fmt(totalCalifica) + '</div><div class="metric-sub">cubierto por envíos confirmados</div></div>' +
-    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto calificado</div></div>' +
+    '<div class="metric"><div class="metric-label">Monto cubierto</div><div class="metric-value">USD ' + fmt(totalComisionBase) + '</div><div class="metric-sub">total o parcialmente enviado</div></div>' +
+    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,01%</div><div class="metric-sub">por monto cubierto</div></div>' +
     '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
       detalleComision.map((d, i) => {
         const badge = d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
-          : d.estado === 'sin_confirmar'
-            ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
-            : d.estado === 'vencido'
-              ? '<span class="badge badge-late">No califica</span>'
-              : '<span class="badge badge-pending">Pendiente</span>';
+          : d.estado === 'parcial'
+            ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+            : d.estado === 'sin_confirmar'
+              ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
+              : d.estado === 'vencido'
+                ? '<span class="badge badge-late">No califica</span>'
+                : '<span class="badge badge-pending">Pendiente</span>';
         const deadline24 = new Date(new Date(d.fecha).getTime() + 24*3600000);
         const estadoDesc = d.califica
-          ? 'Envío confirmado por la empresa dentro de las 24 hs. Comisión: USD ' + fmtDec(d.comision, 2) + '.'
-          : d.estado === 'sin_confirmar'
-            ? 'El intermediario registró un envío dentro de las 24 hs, pero la empresa aún no lo confirmó. La comisión quedará pendiente hasta la confirmación.'
-            : d.estado === 'vencido'
-              ? 'No se registró ningún envío dentro de las 24 hs desde que el cliente informó el pago. No califica para comisión.'
-              : 'Ventana de 24 hs abierta hasta ' + deadline24.toLocaleString('es-AR') + '. Aún puede calificar.';
+          ? 'Envío confirmado por la empresa dentro de las 24 hs. Comisión sobre USD ' + fmt(d.monto) + ': USD ' + fmtDec(d.comision, 2) + '.'
+          : d.estado === 'parcial'
+            ? 'Se cubrió USD ' + fmt(d.montoCubierto) + ' de los USD ' + fmt(d.monto) + ' informados dentro de las 24 hs. Comisión parcial: USD ' + fmtDec(d.comision, 2) + '. Los USD ' + fmt(d.monto - d.montoCubierto) + ' restantes no tuvieron cobertura.'
+            : d.estado === 'sin_confirmar'
+              ? 'El intermediario registró un envío dentro de las 24 hs, pero la empresa aún no lo confirmó. La comisión quedará pendiente hasta la confirmación.'
+              : d.estado === 'vencido'
+                ? 'No se registró ningún envío dentro de las 24 hs desde que el cliente informó el pago. No califica para comisión.'
+                : 'Ventana de 24 hs abierta hasta ' + deadline24.toLocaleString('es-AR') + '. Aún puede calificar.';
         const detailRows =
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
           '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(d.forma_pago || '—') + '</div>' +
@@ -1741,22 +1915,22 @@ async function renderIntComision(year, month) {
   if (btnExp) {
     btnExp.onclick = function() {
       const rows = [['REPORTE DE COMISION - ' + mesLabel.toUpperCase()], []];
-      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Forma de pago', 'Referencia', 'Estado', 'Califica', 'Comision USD']);
+      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Forma de pago', 'Referencia', 'Estado', 'Comision USD']);
       detalleComision.forEach(function(d) {
-        const estadoLabel = d.califica ? 'Califica' : d.estado === 'sin_confirmar' ? 'Enviado sin confirmar' : d.estado === 'vencido' ? 'No califica' : 'Pendiente';
+        const estadoLabel = d.califica ? 'Califica' : d.estado === 'parcial' ? 'Parcial' : d.estado === 'sin_confirmar' ? 'Enviado sin confirmar' : d.estado === 'vencido' ? 'No califica' : 'Pendiente';
         rows.push([
           d.cliente,
           new Date(d.fecha).toLocaleString('es-AR'),
           d.monto,
+          d.montoCubierto || 0,
           d.forma_pago || '',
           d.referencia || '',
           estadoLabel,
-          d.califica ? 'Si' : 'No',
-          d.califica ? parseFloat(d.comision.toFixed(2)) : 0
+          parseFloat((d.comision||0).toFixed(2))
         ]);
       });
       rows.push([]);
-      rows.push(['TOTAL CALIFICA', totalCalifica, '', '', parseFloat(comisionTotal.toFixed(2))]);
+      rows.push(['TOTAL CUBIERTO', totalComisionBase, '', '', '', '', 'COMISION TOTAL', parseFloat(comisionTotal.toFixed(2))]);
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:24},{wch:22},{wch:10},{wch:14}];
@@ -1811,7 +1985,7 @@ async function informarPago() {
   const ref = document.getElementById('cp-ref').value;
   const fileInput = document.getElementById('cp-file');
   const file = fileInput?.files[0];
-  if (!monto) { alert('Ingresá el monto.'); return; }
+  if (!monto || monto <= 0) { alert('Ingresá un monto válido mayor a cero.'); return; }
 
   const btn = document.querySelector('[onclick="informarPago()"]');
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
@@ -1945,9 +2119,6 @@ async function confirmarResetPass() {
     const result = await res.json();
     if (result.error) throw new Error(result.error);
 
-    // Mark user as needing to change password
-    await db.from('profiles').update({ force_password_change: true }).eq('id', resetProfileId);
-
     cerrarModal('modal-reset-pass');
     alert('Contrasena temporal guardada. El usuario debera cambiarla al ingresar.\n\nContrasena temporal: ' + pass);
   } catch(e) {
@@ -1961,9 +2132,12 @@ async function cambiarPassObligatorio() {
   const pass1 = document.getElementById('new-pass-1').value;
   const pass2 = document.getElementById('new-pass-2').value;
   const errEl = document.getElementById('change-pass-error');
+  const btn = document.querySelector('#change-pass-screen .btn-primary');
   errEl.style.display = 'none';
   if (pass1.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
   if (pass1 !== pass2) { showErr(errEl, 'Las contrasenas no coinciden.'); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando...'; }
 
   const { data: sessionData } = await db.auth.getSession();
   const token = sessionData?.session?.access_token;
@@ -1975,7 +2149,7 @@ async function cambiarPassObligatorio() {
   });
 
   const result = await res.json();
-  if (result.error) { showErr(errEl, 'Error: ' + result.error); return; }
+  if (result.error) { showErr(errEl, 'Error: ' + result.error); if (btn) { btn.disabled = false; btn.textContent = 'Guardar y continuar'; } return; }
 
   currentProfile.force_password_change = false;
   showAppScreen();
@@ -2020,6 +2194,8 @@ function cerrarModal(id) { document.getElementById(id).classList.remove('open');
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
 
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+document.getElementById('btn-forgot-submit').addEventListener('click', solicitarResetPass);
+document.getElementById('forgot-usuario').addEventListener('keydown', e => { if (e.key === 'Enter') solicitarResetPass(); });
 </script>
 </body>
 </html>
