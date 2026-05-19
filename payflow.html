@@ -25,6 +25,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 /* ── LOGIN ── */
 #login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}
 .login-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:380px;box-shadow:var(--shadow);}
+@media(max-width:480px){.login-card{padding:28px 20px;border-radius:12px;}}
 .login-logo{font-size:20px;font-weight:600;letter-spacing:0.06em;margin-bottom:4px;}
 .login-sub{font-size:12px;color:var(--text3);font-family:'DM Mono',monospace;margin-bottom:32px;}
 .login-error{background:var(--red-bg);border:1px solid var(--red-border);color:var(--red);font-size:12px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:16px;display:none;}
@@ -149,27 +150,45 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .success-msg{background:var(--green-bg);border:1px solid var(--green-border);color:var(--green);font-size:12px;padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:16px;display:none;}
 
 /* MOBILE NAV BAR */
-.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:50;padding:8px 0 env(safe-area-inset-bottom);}
-.mobile-nav-items{display:flex;justify-content:space-around;}
-.mobile-nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 12px;cursor:pointer;color:var(--text3);font-size:10px;font-weight:500;border-radius:var(--radius-sm);transition:color .12s;}
+.mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);z-index:50;padding:6px 0 env(safe-area-inset-bottom);}
+.mobile-nav-items{display:flex;justify-content:space-around;overflow-x:auto;}
+.mobile-nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:5px 8px;min-width:52px;cursor:pointer;color:var(--text3);font-size:9.5px;font-weight:500;border-radius:var(--radius-sm);transition:color .12s;-webkit-tap-highlight-color:transparent;}
 .mobile-nav-item.active{color:var(--text);}
-.mobile-nav-icon{font-size:18px;line-height:1;}
-.mobile-topbar{display:none;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
+.mobile-nav-icon{font-size:20px;line-height:1;}
+.mobile-topbar{display:none;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;}
 .mobile-topbar-title{font-size:15px;font-weight:500;}
-.mobile-logout{font-size:12px;color:var(--text3);cursor:pointer;padding:4px 8px;border-radius:var(--radius-sm);border:1px solid var(--border);}
+.mobile-logout{font-size:12px;color:var(--text3);cursor:pointer;padding:6px 10px;border-radius:var(--radius-sm);border:1px solid var(--border);-webkit-tap-highlight-color:transparent;}
 
 @media(max-width:768px){
   .sidebar{display:none;}
   .topbar{display:none;}
   .mobile-topbar{display:flex;}
   .mobile-nav{display:block;}
-  .metrics{grid-template-columns:1fr 1fr;}
+  /* metrics: anula los inline styles del JS para forzar 2 columnas */
+  .metrics,.metrics[style]{display:grid!important;grid-template-columns:1fr 1fr!important;gap:10px!important;}
   .grid-2{grid-template-columns:1fr;}
-  .content{padding:16px;padding-bottom:80px;}
-  .pago-row{flex-wrap:wrap;gap:8px;}
-  .pago-amount{font-size:13px;}
-  .modal{margin:12px;}
-  .form-pad{padding:14px;}
+  .content{padding:14px;padding-bottom:84px;}
+  /* pago-row: info+amount en primera línea, badge en segunda */
+  .pago-row{flex-wrap:wrap;gap:6px;padding:12px 14px;}
+  .pago-info{min-width:0;flex:1;}
+  .pago-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .pago-amount{font-size:13px;white-space:nowrap;}
+  .badge{font-size:10px;padding:3px 7px;}
+  /* card-header con botones no se amontone */
+  .card-header{flex-wrap:wrap;gap:8px;}
+  .card-header .btn-sm{font-size:11px;}
+  .modal{margin:10px;}
+  .form-pad{padding:12px 14px;}
+  /* Ocultar avatar en listas para ganar espacio */
+  .pago-avatar{display:none;}
+  /* Asegurar que tablas/inputs no hagan overflow */
+  .form-input,.form-select{font-size:16px;}/* evita zoom en iOS al enfocar */
+}
+@media(max-width:480px){
+  /* En pantallas muy chicas, métricas en 1 columna */
+  .metrics,.metrics[style]{grid-template-columns:1fr!important;}
+  .metric-value{font-size:18px;}
+  .content{padding:10px;padding-bottom:84px;}
 }
 </style>
 </head>
@@ -672,7 +691,7 @@ function buildSidebar(rol) {
     items.map(i => '<div class="nav-item" id="nav-' + esc(i.id) + '" onclick="loadView(\'' + esc(i.id) + '\')"><span class="nav-dot"></span>' + esc(i.label) + '</div>').join('');
   const mobileNav = document.getElementById('mobile-nav-items');
   if (mobileNav) {
-    mobileNav.innerHTML = items.slice(0,5).map(i =>
+    mobileNav.innerHTML = items.map(i =>
       '<div class="mobile-nav-item" id="mnav-' + esc(i.id) + '" onclick="loadView(\'' + esc(i.id) + '\')">' +
       '<span class="mobile-nav-icon">' + (mobileIcons[i.id]||'·') + '</span>' +
       '<span>' + esc(i.label.split(' ')[0]) + '</span>' +
@@ -755,7 +774,7 @@ async function renderDashboard() {
   const c = document.getElementById('main-content');
   c.innerHTML =
     (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aún no fueron enviados a la empresa.</div></div>' : '') +
-    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);">' +
+    '<div class="metrics">' +
     '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido − enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
@@ -1243,7 +1262,7 @@ async function renderIntHome() {
   c.innerHTML =
     (lista.length > 0 ? '<div class="alert alert-danger" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span class="alert-icon">!</span><strong>' + lista.length + ' pago' + (lista.length>1?'s':'') + ' pendiente' + (lista.length>1?'s':'') + ' de confirmar</strong></div></div>' : '') +
     (enviosPendConf.length > 0 ? '<div class="alert" style="background:var(--blue-bg,#EFF6FF);border-color:#BFDBFE;color:#1E40AF;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span>📤</span><strong>' + enviosPendConf.length + ' envío' + (enviosPendConf.length>1?'s':'') + ' esperando confirmación de la empresa</strong></div></div>' : '') +
-    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px;">' +
+    '<div class="metrics" style="margin-bottom:20px;">' +
     '<div class="metric"><div class="metric-label">Saldo a enviar</div><div class="metric-value ' + (saldo>0?'danger':'ok') + '">USD ' + fmt(saldo) + '</div><div class="metric-sub">confirmado - enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos a confirmar</div><div class="metric-value ' + (lista.length>0?'danger':'') + '">' + lista.length + '</div><div class="metric-sub">de clientes</div></div>' +
     '<div class="metric"><div class="metric-label">Envíos pendientes</div><div class="metric-value ' + (enviosPendConf.length>0?'danger':'') + '">' + enviosPendConf.length + '</div><div class="metric-sub">sin confirmar empresa</div></div>' +
@@ -1523,7 +1542,7 @@ async function renderIntHistorial(desde, hasta) {
     '<input class="form-input" type="date" id="hist-hasta" value="' + hastaInput + '" style="width:140px"/>' +
     '<button class="btn btn-primary btn-sm" id="btn-hist-filter">Filtrar</button>' +
     '</div></div></div>' +
-    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+    '<div class="metrics" style="margin-bottom:16px">' +
     '<div class="metric"><div class="metric-label">Saldo pendiente de enviar</div><div class="metric-value ' + (saldoPendiente > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoPendiente) + '</div><div class="metric-sub">total acumulado</div></div>' +
     '<div class="metric"><div class="metric-label">Recibido en el período</div><div class="metric-value">USD ' + fmt(totalRecibido) + '</div><div class="metric-sub">de clientes confirmado</div></div>' +
     '<div class="metric"><div class="metric-label">Enviado en el período</div><div class="metric-value">USD ' + fmt(totalEnviado) + '</div><div class="metric-sub">a la empresa</div></div>' +
@@ -1626,7 +1645,7 @@ async function renderComisionEmpresa(year, month) {
     '<span style="font-size:14px;font-weight:500;min-width:160px;text-align:center;text-transform:capitalize">' + mesLabel + '</span>' +
     '<button class="btn btn-sm" id="btn-mes-next"' + (isMesActual ? ' disabled' : '') + '>Siguiente →</button>' +
     '</div>';
-  html += '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+  html += '<div class="metrics" style="margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision devengada</div><div class="metric-value">USD ' + fmtDec(totalComision, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Ya pagado</div><div class="metric-value ok">USD ' + fmtDec(totalPagado, 2) + '</div><div class="metric-sub">este mes</div></div>' +
     '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
@@ -1732,7 +1751,7 @@ async function renderCliHome() {
 
   const c = document.getElementById('main-content');
   let html =
-    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+    '<div class="metrics" style="margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Total informado</div><div class="metric-value">USD ' + fmt(totalInformado) + '</div><div class="metric-sub">' + lista.length + ' pago' + (lista.length!==1?'s':'') + '</div></div>' +
     '<div class="metric"><div class="metric-label">Confirmados</div><div class="metric-value ok">' + confirmados + '</div><div class="metric-sub">por el intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">En espera</div><div class="metric-value ' + (pendientes>0?'danger':'') + '">' + pendientes + '</div><div class="metric-sub">sin confirmar aún</div></div>' +
@@ -1862,7 +1881,7 @@ async function renderIntComision(year, month) {
     '<span style="font-size:14px;font-weight:500;min-width:160px;text-align:center;text-transform:capitalize">' + mesLabel + '</span>' +
     '<button class="btn btn-sm" id="btn-int-mes-next"' + (isMesActualInt ? ' disabled' : '') + '>Siguiente →</button>' +
     '</div>' +
-    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">' +
+    '<div class="metrics" style="margin-bottom:20px">' +
     '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
     '<div class="metric"><div class="metric-label">Monto cubierto</div><div class="metric-value">USD ' + fmt(totalComisionBase) + '</div><div class="metric-sub">total o parcialmente enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,1%</div><div class="metric-sub">por monto cubierto</div></div>' +
