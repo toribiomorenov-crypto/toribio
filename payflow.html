@@ -1361,14 +1361,21 @@ async function renderIntHistorial(desde, hasta) {
   const desdeVal = desde || primerDia;
   const hastaVal = hasta || ultimoDia;
 
-  const [pagRes, envRes] = await Promise.all([
+  const [pagRes, envRes, allPagRes, allEnvRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('monto').eq('estado', 'confirmado'),
+    db.from('envios_intermediario').select('monto_total'),
   ]);
   const pagos = pagRes.data || [];
   const envios = envRes.data || [];
   const totalRecibido = pagos.filter(p=>p.estado==='confirmado').reduce((s,p)=>s+Number(p.monto),0);
   const totalEnviado = envios.reduce((s,e)=>s+Number(e.monto_total),0);
+  // Saldo all-time (mismo que "Enviar a empresa" — fuente de verdad)
+  const allTimeRecibido = (allPagRes.data||[]).reduce((s,p)=>s+Number(p.monto),0);
+  const allTimeEnviado = (allEnvRes.data||[]).reduce((s,e)=>s+Number(e.monto_total),0);
+  const saldoPendiente = allTimeRecibido - allTimeEnviado;
+
   const c = document.getElementById('main-content');
   const desdeInput = desdeVal.split('T')[0];
   const hastaInput = hastaVal.split('T')[0];
@@ -1381,9 +1388,10 @@ async function renderIntHistorial(desde, hasta) {
     '<input class="form-input" type="date" id="hist-hasta" value="' + hastaInput + '" style="width:140px"/>' +
     '<button class="btn btn-primary btn-sm" id="btn-hist-filter">Filtrar</button>' +
     '</div></div></div>' +
-    '<div class="metrics" style="grid-template-columns:repeat(2,1fr);margin-bottom:16px">' +
-    '<div class="metric"><div class="metric-label">Total enviado a empresa</div><div class="metric-value">USD ' + fmt(totalEnviado) + '</div><div class="metric-sub">en el periodo</div></div>' +
-    '<div class="metric"><div class="metric-label">Total recibido de clientes</div><div class="metric-value">USD ' + fmt(totalRecibido) + '</div><div class="metric-sub">confirmado en el periodo</div></div>' +
+    '<div class="metrics" style="grid-template-columns:repeat(3,1fr);margin-bottom:16px">' +
+    '<div class="metric"><div class="metric-label">Saldo pendiente de enviar</div><div class="metric-value ' + (saldoPendiente > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoPendiente) + '</div><div class="metric-sub">total acumulado</div></div>' +
+    '<div class="metric"><div class="metric-label">Recibido en el período</div><div class="metric-value">USD ' + fmt(totalRecibido) + '</div><div class="metric-sub">de clientes confirmado</div></div>' +
+    '<div class="metric"><div class="metric-label">Enviado en el período</div><div class="metric-value">USD ' + fmt(totalEnviado) + '</div><div class="metric-sub">a la empresa</div></div>' +
     '</div>' +
     '<div class="card section-gap"><div class="card-header"><div class="card-title">Envios a la empresa</div></div>' +
     (envios.length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
