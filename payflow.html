@@ -1140,6 +1140,13 @@ async function renderIntHome() {
 async function confirmarPagoCliente(id, nombre, monto) {
   if (!confirm('Confirmar recepcion de USD ' + fmt(monto) + ' de ' + nombre + '?')) return;
   await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
+  const { data: s } = await db.auth.getSession();
+  const token = s?.session?.access_token;
+  fetch(BACKEND_URL + '/api/notify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ tipo: 'pago_confirmado', monto, clienteNombre: nombre })
+  });
   await renderIntHome();
 }
 
