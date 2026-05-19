@@ -1595,16 +1595,21 @@ async function renderIntComision(year, month) {
   const ultimoDia = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
   const mesLabel = new Date(year, month, 1).toLocaleString('es-AR', { month: 'long', year: 'numeric' });
 
-  const [pagRes, envRes] = await Promise.all([
+  const [pagRes, envConfRes, envPendRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
-    db.from('envios_intermediario').select('monto_total, confirmado').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
+    db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
+    db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDia),
   ]);
 
   const pagos = pagRes.data || [];
 
-  // FIFO + 24hs: cada envío confirmado cubre los pagos más viejos primero,
-  // pero solo los pagos que ocurrieron dentro de las 24hs anteriores al envío.
-  const enviosConf = (envRes.data || [])
+  // FIFO + 24hs sobre envíos confirmados
+  const enviosConf = (envConfRes.data || [])
+    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+
+  // Envíos sin confirmar (para mostrar estado intermedio)
+  const enviosPend = (envPendRes.data || [])
     .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
     .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
 
@@ -1615,21 +1620,29 @@ async function renderIntComision(year, month) {
 
   pagosOrdenados.forEach(p => {
     const monto = Number(p.monto);
-    // La ventana de 24hs arranca desde que el INTERMEDIARIO confirmó el pago (no desde que el cliente lo informó)
     const fechaRef = new Date(p.created_at);
     const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
 
-    // Buscar el primer envío dentro de la ventana de 24hs con saldo disponible suficiente
-    const envio = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
-
-    if (envio) {
-      envio.disponible -= monto;
+    // 1. ¿Hay envío CONFIRMADO dentro de las 24hs con saldo suficiente?
+    const envioConf = enviosConf.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
+    if (envioConf) {
+      envioConf.disponible -= monto;
       totalCalifica += monto;
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, confirmado_at: p.confirmado_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
-    } else {
-      const vencio = ahora > deadline.getTime();
-      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, confirmado_at: p.confirmado_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: true, comision: monto * 0.0001, estado: 'califica' });
+      return;
     }
+
+    // 2. ¿Hay envío SIN CONFIRMAR dentro de las 24hs? (enviado pero empresa no confirmó aún)
+    const envioPend = enviosPend.find(e => e.fecha >= fechaRef && e.fecha <= deadline && e.disponible >= monto);
+    if (envioPend) {
+      envioPend.disponible -= monto;
+      detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: 'sin_confirmar' });
+      return;
+    }
+
+    // 3. Sin envío — ¿venció la ventana?
+    const vencio = ahora > deadline.getTime();
+    detalleComision.push({ cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente' });
   });
 
   const comisionTotal = totalCalifica * 0.0001;
@@ -1655,9 +1668,11 @@ async function renderIntComision(year, month) {
         '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
         (d.califica
           ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
-          : d.estado === 'vencido'
-            ? '<span class="badge badge-late" title="Pasaron más de 24hs sin envío">No califica</span>'
-            : '<span class="badge badge-pending">Pendiente</span>'
+          : d.estado === 'sin_confirmar'
+            ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
+            : d.estado === 'vencido'
+              ? '<span class="badge badge-late">No califica</span>'
+              : '<span class="badge badge-pending">Pendiente</span>'
         ) +
         '</div>'
       ).join('')
