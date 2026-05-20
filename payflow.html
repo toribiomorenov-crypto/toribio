@@ -358,8 +358,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       <label class="form-label">Rol</label>
       <select class="form-select" id="nu-rol">
         <option value="cliente">Cliente</option>
-        <option value="pagador">Pagador</option>
-        <option value="empresa">Empresa</option>
+        <option value="pagador">Pagador (intermediario)</option>
+        <option value="empresa">Empresa (administrador)</option>
       </select>
     </div>
     <div class="modal-actions">
@@ -510,11 +510,17 @@ async function doLogin() {
   const usuario = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-pass').value;
   const errEl = document.getElementById('login-error');
+  const btn = document.querySelector('#login-screen .btn-primary');
   errEl.style.display = 'none';
   if (!usuario || !pass) { showErr(errEl, 'Completa todos los campos.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Ingresando...'; }
   const email = usuario.includes('@') ? usuario : usuario + '@payflow.local';
   const { data, error } = await db.auth.signInWithPassword({ email, password: pass });
-  if (error) { showErr(errEl, 'Usuario o contrasena incorrectos.'); return; }
+  if (error) {
+    showErr(errEl, 'Usuario o contrasena incorrectos.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Ingresar'; }
+    return;
+  }
   await initApp(data.user);
 }
 
@@ -798,7 +804,7 @@ async function renderDashboard() {
         '<div class="pago-row" style="padding:10px 18px">' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-released':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':'Pendiente') + '</span>' +
+        '<span class="badge ' + (p.estado==='confirmado'?'badge-released':p.estado==='cancelado'?'badge-late':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':p.estado==='cancelado'?'Cancelado':'Pendiente') + '</span>' +
         '</div>'
       ).join('')
     ) + '</div>' +
@@ -1653,8 +1659,8 @@ async function renderIntHistorial(desde, hasta) {
       }).join('')
     ) + '</div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Pagos recibidos de clientes</div></div>' +
-    (pagos.length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
-      pagos.map(p =>
+    (pagos.filter(p=>p.estado!=='cancelado').length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
+      pagos.filter(p=>p.estado!=='cancelado').map(p =>
         '<div class="pago-row">' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
@@ -1725,7 +1731,7 @@ async function renderComisionEmpresa(year, month) {
 
   const totalComision = items.reduce((s,i) => s + i.comision, 0);
   const totalPagado = pagosCom.filter(p => {
-    const f = new Date(p.created_at);
+    const f = new Date(p.fecha_pago || p.created_at);
     return f >= new Date(primerDia) && f <= new Date(ultimoDia);
   }).reduce((s,p) => s + Number(p.monto), 0);
   const saldoComision = totalComision - totalPagado;
@@ -2130,14 +2136,17 @@ async function informarPago() {
 // USUARIOS
 async function crearUsuario() {
   const nombre = document.getElementById('nu-nombre').value.trim();
-  const usuario = document.getElementById('nu-email').value.trim().toLowerCase().replace(/[^a-z0-9._-]/g,'');
+  const usuarioRaw = document.getElementById('nu-email').value.trim().toLowerCase();
+  const usuario = usuarioRaw.replace(/[^a-z0-9._-]/g,'');
   const pass = document.getElementById('nu-pass').value;
   const rol = document.getElementById('nu-rol').value;
   const emailNotif = document.getElementById('nu-email-notif').value.trim().toLowerCase();
   const errEl = document.getElementById('modal-error');
   const btnCrear = document.querySelector('#modal-crear-usuario .btn-primary');
   errEl.style.display = 'none';
-  if (!nombre || !usuario || !pass) { showErr(errEl, 'Completá todos los campos obligatorios.'); return; }
+  if (!nombre || !usuarioRaw || !pass) { showErr(errEl, 'Completá todos los campos obligatorios.'); return; }
+  if (usuario !== usuarioRaw) { showErr(errEl, 'El usuario solo puede tener letras minúsculas, números, puntos y guiones. Sin espacios ni caracteres especiales.'); return; }
+  if (usuario.length < 3) { showErr(errEl, 'El usuario debe tener al menos 3 caracteres.'); return; }
   if (!emailNotif) { showErr(errEl, 'El email es obligatorio (se usa para notificaciones y recuperar contraseña).'); return; }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNotif)) { showErr(errEl, 'El email no tiene un formato válido.'); return; }
   if (pass.length < 6) { showErr(errEl, 'La contrasena debe tener al menos 6 caracteres.'); return; }
