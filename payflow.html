@@ -1101,7 +1101,7 @@ async function renderClientes() {
   const btnImport = document.getElementById('btn-import-excel');
   if (btnImport) btnImport.onclick = function() { document.getElementById('import-file').click(); };
   const btnNuevo = document.getElementById('btn-nuevo-usuario');
-  if (btnNuevo) btnNuevo.onclick = function() { abrirModal('modal-crear-usuario'); };
+  if (btnNuevo) btnNuevo.onclick = function() { abrirNuevoUsuario(); };
   const importFile = document.getElementById('import-file');
   if (importFile) importFile.onchange = function() { importarClientes(this); };
 
@@ -1234,13 +1234,24 @@ async function importarClientes(input) {
   }
 }
 
+function abrirNuevoUsuario() {
+  document.getElementById('nu-nombre').value = '';
+  document.getElementById('nu-email').value = '';
+  document.getElementById('nu-pass').value = '';
+  document.getElementById('nu-email-notif').value = '';
+  document.getElementById('nu-rol').value = 'cliente';
+  document.getElementById('modal-error').style.display = 'none';
+  abrirModal('modal-crear-usuario');
+}
+
 function abrirCrearAcceso(nombre) {
   document.getElementById('nu-nombre').value = nombre;
   document.getElementById('nu-rol').value = 'cliente';
-  // Pre-fill usuario: lowercase, no spaces
   const usuarioSugerido = nombre.toLowerCase().replace(/\s+/g,'').replace(/[^a-z0-9]/g,'').substring(0,20);
   document.getElementById('nu-email').value = usuarioSugerido;
   document.getElementById('nu-pass').value = '';
+  document.getElementById('nu-email-notif').value = '';
+  document.getElementById('modal-error').style.display = 'none';
   abrirModal('modal-crear-usuario');
 }
 
@@ -1269,7 +1280,7 @@ async function renderUsuarios() {
   const activos = (profiles||[]).filter(p => p.activo !== false);
   const c = document.getElementById('main-content');
   c.innerHTML =
-    '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;"><button class="btn btn-primary" onclick="abrirModal(\'modal-crear-usuario\')">+ Nuevo usuario</button></div>' +
+    '<div style="display:flex;justify-content:flex-end;margin-bottom:16px;"><button class="btn btn-primary" onclick="abrirNuevoUsuario()">+ Nuevo usuario</button></div>' +
     '<div class="card"><div class="card-header"><div class="card-title">Usuarios del sistema</div></div>' +
     activos.map(p => {
       const usuario = p.email.replace('@payflow.local','');
@@ -1357,15 +1368,16 @@ async function renderIntHome() {
 
   document.querySelectorAll('[data-type="btn-conf-cli"]').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      confirmarPagoCliente(this.dataset.id, this.dataset.nombre, this.dataset.monto);
+      confirmarPagoCliente(this.dataset.id, this.dataset.nombre, this.dataset.monto, this);
     });
   });
 }
 
-async function confirmarPagoCliente(id, nombre, monto) {
+async function confirmarPagoCliente(id, nombre, monto, btn) {
   if (!confirm('Confirmar recepcion de USD ' + fmt(monto) + ' de ' + nombre + '?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirmando...'; }
   const { error: confErr } = await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
-  if (confErr) { alert('Error al confirmar el pago: ' + confErr.message); return; }
+  if (confErr) { alert('Error al confirmar el pago: ' + confErr.message); if (btn) { btn.disabled = false; btn.textContent = 'Confirmar'; } return; }
   const { data: s } = await db.auth.getSession();
   const token = s?.session?.access_token;
   fetch(BACKEND_URL + '/api/notify', {
@@ -1831,7 +1843,7 @@ async function renderCliHome() {
   const c = document.getElementById('main-content');
   let html =
     '<div class="metrics" style="margin-bottom:20px">' +
-    '<div class="metric"><div class="metric-label">Total informado</div><div class="metric-value">USD ' + fmt(totalInformado) + '</div><div class="metric-sub">' + lista.length + ' pago' + (lista.length!==1?'s':'') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Total informado</div><div class="metric-value">USD ' + fmt(totalInformado) + '</div><div class="metric-sub">' + activos.length + ' pago' + (activos.length!==1?'s':'') + '</div></div>' +
     '<div class="metric"><div class="metric-label">Confirmados</div><div class="metric-value ok">' + confirmados + '</div><div class="metric-sub">por el intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">En espera</div><div class="metric-value ' + (pendientes>0?'danger':'') + '">' + pendientes + '</div><div class="metric-sub">sin confirmar aún</div></div>' +
     '</div>' +
@@ -2143,6 +2155,9 @@ async function crearUsuario() {
     const result = await res.json();
     if (result.error) throw new Error(result.error);
     cerrarModal('modal-crear-usuario');
+    document.getElementById('nu-nombre').value = '';
+    document.getElementById('nu-email').value = '';
+    document.getElementById('nu-pass').value = '';
     document.getElementById('nu-email-notif').value = '';
     alert('Usuario creado correctamente.\n\nNombre: ' + nombre + '\nUsuario: ' + usuario + '\nContrasena: ' + pass + '\n\nGuarda estos datos para compartirlos con el usuario.');
     await renderUsuarios();
