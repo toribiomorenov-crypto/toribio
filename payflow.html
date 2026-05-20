@@ -1723,7 +1723,13 @@ async function renderComisionEmpresa(year, month) {
 
   const totalComision = items.reduce((s,i) => s + i.comision, 0);
   const totalPagado = pagosCom.filter(p => {
-    const f = new Date(p.fecha_pago || p.created_at);
+    // fecha_pago es 'YYYY-MM-DD' (solo fecha, sin hora). new Date('YYYY-MM-DD') la
+    // interpreta como UTC medianoche, pero primerDia/ultimoDia son hora local → bug de
+    // timezone. Agregamos 'T12:00:00' para forzar mediodía local y evitar que el primer
+    // o último día del mes quede fuera por el desfase UTC-3.
+    const f = p.fecha_pago
+      ? new Date(p.fecha_pago + 'T12:00:00')
+      : new Date(p.created_at);
     return f >= new Date(primerDia) && f <= new Date(ultimoDia);
   }).reduce((s,p) => s + Number(p.monto), 0);
   const saldoComision = totalComision - totalPagado;
@@ -1790,7 +1796,10 @@ async function renderComisionEmpresa(year, month) {
   if (pagosCom.length > 0) {
     html += '<div class="card"><div class="card-header"><div class="card-title">Historial de pagos de comision</div></div>';
     pagosCom.forEach(function(p) {
-      html += '<div class="data-row"><span class="data-label">' + new Date(p.created_at).toLocaleDateString('es-AR') + (p.notas ? ' · ' + esc(p.notas) : '') + '</span><span class="data-value">USD ' + fmtDec(p.monto, 2) + '</span></div>';
+      const fechaComDisplay = p.fecha_pago
+        ? new Date(p.fecha_pago + 'T12:00:00').toLocaleDateString('es-AR')
+        : new Date(p.created_at).toLocaleDateString('es-AR');
+      html += '<div class="data-row"><span class="data-label">' + fechaComDisplay + (p.notas ? ' · ' + esc(p.notas) : '') + '</span><span class="data-value">USD ' + fmtDec(p.monto, 2) + '</span></div>';
     });
     html += '</div>';
   }
@@ -2288,6 +2297,7 @@ async function cambiarPassObligatorio() {
   if (topbarN2) topbarN2.textContent = currentProfile.nombre;
   if (topbarI2) topbarI2.textContent = initials2;
   buildSidebar(currentProfile.rol);
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   setupRealtime(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
