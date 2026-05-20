@@ -1543,6 +1543,11 @@ async function registrarEnvio() {
   const fileInput = document.getElementById('env-file');
   if (fileInput && fileInput.files[0]) {
     const file = fileInput.files[0];
+    if (file.size > 5 * 1024 * 1024) {
+      alert('El archivo es demasiado grande. El tamaño máximo es 5 MB.');
+      if (btn) { btn.disabled = false; btn.textContent = 'Registrar envio'; }
+      return;
+    }
     const ext = file.name.split('.').pop();
     const path = 'envios/' + Date.now() + '.' + ext;
     const { data: uploaded, error: upErr } = await db.storage.from('comprobantes').upload(path, file);
@@ -1831,9 +1836,10 @@ async function renderCliHome() {
   const { data: pagos } = await db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false });
 
   const lista = pagos || [];
-  const totalInformado = lista.reduce((s,p) => s + Number(p.monto), 0);
-  const confirmados = lista.filter(p => p.estado === 'confirmado').length;
-  const pendientes = lista.filter(p => p.estado === 'pendiente').length;
+  const activos = lista.filter(p => p.estado !== 'cancelado');
+  const totalInformado = activos.reduce((s,p) => s + Number(p.monto), 0);
+  const confirmados = activos.filter(p => p.estado === 'confirmado').length;
+  const pendientes = activos.filter(p => p.estado === 'pendiente').length;
 
   const c = document.getElementById('main-content');
   let html =
@@ -1846,18 +1852,21 @@ async function renderCliHome() {
     (lista.length === 0 ? '<div class="empty-state">No informaste pagos aún.<br/><br/><button class="btn btn-primary" onclick="loadView(\'cli-pagar\')">Informar primer pago</button></div>' :
       lista.map(p => {
         const confirmado = p.estado === 'confirmado';
+        const cancelado = p.estado === 'cancelado';
         return '<div class="pago-row">' +
           '<div class="pago-info">' +
           '<div class="pago-name">' + esc(p.forma_pago.charAt(0).toUpperCase()+p.forma_pago.slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') + '</div>' +
           '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div>' +
           '</div>' +
-          '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
+          '<div class="pago-amount" style="' + (cancelado ? 'color:var(--text3);text-decoration:line-through' : '') + '">USD ' + fmt(p.monto) + '</div>' +
           (confirmado
             ? '<span class="badge badge-released">✓ Confirmado</span>'
-            : '<span class="badge badge-pending">⏳ En espera</span>'
+            : cancelado
+              ? '<span class="badge badge-late">✕ Cancelado</span>'
+              : '<span class="badge badge-pending">⏳ En espera</span>'
           ) +
           (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
-          (!confirmado ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-type="btn-cancelar-pago">Cancelar</button>' : '') +
+          (!confirmado && !cancelado ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-type="btn-cancelar-pago">Cancelar</button>' : '') +
           '</div>';
       }).join('')
     ) + '</div>';
@@ -1867,10 +1876,10 @@ async function renderCliHome() {
   document.querySelectorAll('[data-type="btn-cancelar-pago"]').forEach(function(btn) {
     btn.addEventListener('click', async function() {
       const pid = this.getAttribute('data-pid');
-      if (!confirm('¿Cancelar este pago? Se eliminará y no podrá recuperarse.')) return;
+      if (!confirm('¿Cancelar este pago? Esta acción no se puede deshacer.')) return;
       this.disabled = true; this.textContent = 'Cancelando...';
       const { error } = await db.from('pagos_cliente')
-        .delete()
+        .update({ estado: 'cancelado' })
         .eq('id', pid)
         .eq('cliente_profile_id', currentUser.id)
         .eq('estado', 'pendiente');
@@ -2072,7 +2081,7 @@ async function renderCliPagar() {
     '<button type="button" id="cp-file-clear" style="display:none;font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:0" onclick="document.getElementById(\'cp-file\').value=\'\';document.getElementById(\'cp-file-name\').textContent=\'\';this.style.display=\'none\'">✕ Quitar</button>' +
     '</div>' +
     '<div id="cp-msg" style="display:none;margin-bottom:12px" class="alert alert-info"></div>' +
-    '<button class="btn btn-primary" onclick="informarPago()">Enviar informe de pago</button>' +
+    '<button class="btn btn-primary" id="btn-informar-pago" onclick="informarPago()">Enviar informe de pago</button>' +
     '</div></div>';
 
   document.getElementById('cp-file').addEventListener('change', e => {
@@ -2091,8 +2100,9 @@ async function informarPago() {
   const fileInput = document.getElementById('cp-file');
   const file = fileInput?.files[0];
   if (!monto || monto <= 0) { alert('Ingresá un monto válido mayor a cero.'); return; }
+  if (file && file.size > 5 * 1024 * 1024) { alert('El archivo es demasiado grande. El tamaño máximo es 5 MB.'); return; }
 
-  const btn = document.querySelector('[onclick="informarPago()"]');
+  const btn = document.getElementById('btn-informar-pago');
   if (btn) { btn.disabled = true; btn.textContent = 'Enviando...'; }
 
   let comprobante_url = null;
@@ -2168,6 +2178,9 @@ async function guardarEditarUsuario() {
   const errEl = document.getElementById('edit-error');
   const btn = document.getElementById('btn-guardar-editar');
   errEl.style.display = 'none';
+  if (emailNotif && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNotif)) {
+    showErr(errEl, 'El email no tiene un formato válido.'); return;
+  }
   btn.disabled = true; btn.textContent = 'Guardando...';
   try {
     const { data: s } = await db.auth.getSession();
