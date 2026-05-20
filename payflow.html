@@ -1019,26 +1019,6 @@ function calcularDemoraEnvioTexto(envio, pagos) {
   return { label, color: avg <= 24 ? 'var(--green)' : 'var(--red)' };
 }
 
-// Calcula demora entre pago de cliente y primer envio del intermediario que lo cubre
-function calcularDemoraBadge(pago, envios) {
-  if (pago.estado !== 'confirmado') return '';
-  const fechaPago = new Date(pago.created_at);
-  // Buscar el primer envio posterior al pago que incluya a este cliente
-  const enviosCandidatos = envios
-    .filter(e => new Date(e.created_at) >= fechaPago)
-    .filter(e => (e.detalle_envio||[]).some(d => d.cliente_profile_id === pago.cliente_profile_id));
-  if (enviosCandidatos.length === 0) {
-    // Aun no fue enviado - mostrar tiempo transcurrido
-    const horas = (Date.now() - fechaPago.getTime()) / 3600000;
-    const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
-    return '<span style="font-size:11px;color:var(--amber);font-family:DM Mono,monospace;white-space:nowrap">En espera: ' + label + '</span>';
-  }
-  const primerEnvio = enviosCandidatos[0];
-  const horas = (new Date(primerEnvio.created_at) - fechaPago) / 3600000;
-  const label = horas < 24 ? Math.round(horas) + 'hs' : (horas/24).toFixed(1) + 'd';
-  const ok = horas <= 24;
-  return '<span style="font-size:11px;color:' + (ok?'var(--green)':'var(--red)') + ';font-family:DM Mono,monospace;white-space:nowrap">' + label + (ok?' - ok':' - tardio') + '</span>';
-}
 
 // ── EMPRESA: PAGOS CLIENTES ──
 async function renderPagosClientes() {
@@ -2056,7 +2036,7 @@ async function renderIntComision(year, month) {
       const ws = XLSX.utils.aoa_to_sheet(rows);
       ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:24},{wch:22},{wch:10},{wch:14}];
       XLSX.utils.book_append_sheet(wb, ws, 'Comision');
-      XLSX.writeFile(wb, 'comision_' + mesLabel.replace(' ','_') + '.xlsx');
+      XLSX.writeFile(wb, 'comision_' + mesLabel.replace(/\s+/g,'_') + '.xlsx');
     };
   }
 
@@ -2293,6 +2273,7 @@ async function cambiarPassObligatorio() {
   if (topbarN2) topbarN2.textContent = currentProfile.nombre;
   if (topbarI2) topbarI2.textContent = initials2;
   buildSidebar(currentProfile.rol);
+  setupRealtime(currentProfile.rol);
   const defaultView = currentProfile.rol === 'empresa' ? 'dashboard' : currentProfile.rol === 'pagador' ? 'int-home' : 'cli-home';
   loadView(defaultView);
 }
