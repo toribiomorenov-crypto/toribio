@@ -1043,7 +1043,8 @@ async function renderPagosClientes() {
   const pagos = pagRes.data || [];
   const allEnvios = envRes.data || [];
   const c = document.getElementById('main-content');
-  const estadoLabel = { pendiente: 'Pendiente', confirmado: 'Confirmado' };
+  const estadoLabel = { pendiente: 'Pendiente', confirmado: 'Confirmado', cancelado: 'Cancelado' };
+  const estadoBadge = { confirmado: 'badge-confirmed', pendiente: 'badge-pending', cancelado: 'badge-late' };
   c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los cobros informados por clientes</div></div>' +
     (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aún.</div>' :
       pagos.map(p =>
@@ -1051,8 +1052,8 @@ async function renderPagosClientes() {
         '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + (p.referencia?' · '+esc(p.referencia):'') + '</div></div>' +
-        '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (p.estado==='confirmado'?'badge-confirmed':p.estado==='pendiente'?'badge-pending':'badge-released') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
+        '<div class="pago-amount" style="' + (p.estado==='cancelado'?'color:var(--text3);text-decoration:line-through':'') + '">USD ' + fmt(p.monto) + '</div>' +
+        '<span class="badge ' + (estadoBadge[p.estado]||'badge-pending') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
         (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
         '</div>'
       ).join('')
