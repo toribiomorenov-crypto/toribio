@@ -1376,8 +1376,17 @@ async function renderIntHome() {
 async function confirmarPagoCliente(id, nombre, monto, btn) {
   if (!confirm('Confirmar recepcion de USD ' + fmt(monto) + ' de ' + nombre + '?')) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Confirmando...'; }
-  const { error: confErr } = await db.from('pagos_cliente').update({ estado: 'confirmado', confirmado_at: new Date().toISOString() }).eq('id', id);
+  const { data: updated, error: confErr } = await db.from('pagos_cliente')
+    .update({ estado: 'confirmado', confirmado_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('estado', 'pendiente')
+    .select();
   if (confErr) { alert('Error al confirmar el pago: ' + confErr.message); if (btn) { btn.disabled = false; btn.textContent = 'Confirmar'; } return; }
+  if (!updated || updated.length === 0) {
+    alert('Este pago ya no está disponible (fue cancelado por el cliente).');
+    await renderIntHome();
+    return;
+  }
   const { data: s } = await db.auth.getSession();
   const token = s?.session?.access_token;
   fetch(BACKEND_URL + '/api/notify', {
@@ -1886,12 +1895,16 @@ async function renderCliHome() {
       const pid = this.getAttribute('data-pid');
       if (!confirm('¿Cancelar este pago? Esta acción no se puede deshacer.')) return;
       this.disabled = true; this.textContent = 'Cancelando...';
-      const { error } = await db.from('pagos_cliente')
+      const { data: cancelled, error } = await db.from('pagos_cliente')
         .update({ estado: 'cancelado' })
         .eq('id', pid)
         .eq('cliente_profile_id', currentUser.id)
-        .eq('estado', 'pendiente');
+        .eq('estado', 'pendiente')
+        .select();
       if (error) { alert('Error al cancelar: ' + error.message); this.disabled = false; this.textContent = 'Cancelar'; return; }
+      if (!cancelled || cancelled.length === 0) {
+        alert('Este pago ya fue confirmado por el intermediario y no se puede cancelar.');
+      }
       await renderCliHome();
     });
   });
