@@ -950,7 +950,9 @@ async function exportarExcel() {
   pagos.filter(p => p.estado === 'confirmado').forEach(p => {
     movimientos.push({ fecha: new Date(p.created_at), tipo: 'Cobro de cliente', cliente: p.profiles?.nombre||'-', referencia: p.referencia||'', debe: Number(p.monto), haber: 0 });
   });
-  envios.forEach(e => {
+  // Solo envíos confirmados por la empresa: los pendientes aún no están
+  // verificados y no deben aparecer como "Haber" en la cuenta corriente.
+  envios.filter(e => e.confirmado === true).forEach(e => {
     const det = (e.detalle_envio||[]).map(d => (d.profiles?.nombre||'-') + ' USD ' + d.monto).join(' | ');
     movimientos.push({ fecha: new Date(e.created_at), tipo: 'Envio a empresa', cliente: det, referencia: e.referencia||'', debe: 0, haber: Number(e.monto_total) });
   });
