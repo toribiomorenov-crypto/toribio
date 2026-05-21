@@ -1660,10 +1660,13 @@ async function renderIntHistorial(desde, hasta) {
     (envios.length === 0 ? '<div class="empty-state">Sin envios aun.</div>' :
       envios.map(e => {
         const det = e.detalle_envio || [];
+        const confBadge = e.confirmado === true
+          ? '<span class="badge badge-released" style="font-size:10px">Confirmado</span>'
+          : '<span class="badge badge-pending" style="font-size:10px">Sin confirmar</span>';
         return '<div style="border-bottom:0.5px solid var(--border)">' +
           '<div class="pago-row" style="cursor:pointer" onclick="toggleDetalle(\'henv-' + e.id + '\')">' +
           '<div class="pago-info"><div class="pago-name">' + esc(e.medio) + (e.referencia?' - '+esc(e.referencia):'') + '</div><div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + '</div></div>' +
-          '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div><span style="font-size:11px;color:var(--text3)">ver detalle</span></div>' +
+          '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' + confBadge + '<span style="font-size:11px;color:var(--text3);margin-left:4px">ver detalle</span></div>' +
           '<div id="henv-' + e.id + '" style="display:none;padding:8px 18px 12px;background:var(--surface2)">' +
           det.map(d => '<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--border)"><span>' + esc(d.profiles?.nombre||'-') + (d.nota?' - '+esc(d.nota):'') + '</span><span style="font-family:\'DM Mono\',monospace">USD ' + fmt(d.monto) + '</span></div>').join('') +
           '</div></div>';
