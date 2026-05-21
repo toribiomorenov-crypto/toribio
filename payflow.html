@@ -1637,8 +1637,11 @@ async function renderIntHistorial(desde, hasta) {
   const saldoPendiente = allTimeRecibido - allTimeEnviado;
 
   const c = document.getElementById('main-content');
-  const desdeInput = desdeVal.split('T')[0];
-  const hastaInput = hastaVal.split('T')[0];
+  // Convertir a fecha local (no UTC) para los inputs de tipo date.
+  // split('T')[0] da la fecha UTC, no la local — en Argentina (UTC-3) el
+  // fin de día '23:59:59' local se convierte a '02:59:59Z' del día siguiente.
+  const desdeInput = new Date(desdeVal).toLocaleDateString('sv-SE');
+  const hastaInput = new Date(hastaVal).toLocaleDateString('sv-SE');
   c.innerHTML =
     '<div class="card" style="margin-bottom:16px"><div class="form-pad" style="padding:12px 18px">' +
     '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
@@ -1879,7 +1882,7 @@ async function renderCliHome() {
         const cancelado = p.estado === 'cancelado';
         return '<div class="pago-row">' +
           '<div class="pago-info">' +
-          '<div class="pago-name">' + esc(p.forma_pago.charAt(0).toUpperCase()+p.forma_pago.slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') + '</div>' +
+          '<div class="pago-name">' + esc((p.forma_pago||'').charAt(0).toUpperCase()+(p.forma_pago||'').slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') + '</div>' +
           '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div>' +
           '</div>' +
           '<div class="pago-amount" style="' + (cancelado ? 'color:var(--text3);text-decoration:line-through' : '') + '">USD ' + fmt(p.monto) + '</div>' +
