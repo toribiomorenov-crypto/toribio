@@ -2342,6 +2342,7 @@ function abrirModal(id) { document.getElementById(id).classList.add('open'); }
 function cerrarModal(id) { document.getElementById(id).classList.remove('open'); }
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
 
+document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 document.getElementById('btn-forgot-submit').addEventListener('click', solicitarResetPass);
 document.getElementById('forgot-usuario').addEventListener('keydown', e => { if (e.key === 'Enter') solicitarResetPass(); });
@@ -2388,7 +2389,7 @@ function renderAyuda() {
 
       s('⚙️ Usuarios', [
         ['➕', '¿Cómo creo un usuario?',
-          'Andá a <strong>Usuarios → Crear usuario</strong>. Completá nombre, usuario, contraseña y perfil (pagador o cliente). El usuario va a poder ingresar de inmediato. Si querés que cambie la contraseña al primer login, activá la opción correspondiente.'],
+          'Andá a <strong>Usuarios → Crear usuario</strong>. Completá nombre, usuario, contraseña y perfil (pagador o cliente). La contraseña que ingresás es temporal: el sistema le pedirá al usuario que la cambie la primera vez que ingrese.'],
         ['📧', '¿Para qué sirve el email de notificaciones?',
           'Cada usuario puede tener un email donde recibe avisos: nuevos pagos, confirmaciones, envíos. No es el email de login (el login usa @payflow.local internamente), sino el email real de la persona.'],
         ['🔑', '¿Qué pasa si un usuario olvidó su contraseña?',
