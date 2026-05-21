@@ -1766,7 +1766,7 @@ async function renderComisionEmpresa(year, month) {
     '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
     '</div>';
 
-  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos con cobertura este mes</div></div>';
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos con cobertura este mes</div><button class="btn btn-sm" id="btn-export-comision-empresa">Exportar Excel</button></div>';
   if (items.length === 0) {
     html += '<div class="empty-state">Sin pagos cubiertos este mes.</div>';
   } else {
@@ -1824,6 +1824,34 @@ async function renderComisionEmpresa(year, month) {
   }
 
   c.innerHTML = html;
+
+  const btnExpEmp = document.getElementById('btn-export-comision-empresa');
+  if (btnExpEmp) {
+    btnExpEmp.onclick = function() {
+      const rows = [['REPORTE DE COMISIÓN — ' + mesLabel.toUpperCase()], []];
+      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Forma de pago', 'Referencia', 'Estado', 'Comisión USD']);
+      items.forEach(function(item) {
+        rows.push([
+          item.cliente,
+          new Date(item.fecha).toLocaleString('es-AR'),
+          item.monto,
+          item.montoCubierto,
+          item.forma_pago || '',
+          item.referencia || '',
+          item.califica ? 'Califica' : 'Parcial',
+          parseFloat((item.comision || 0).toFixed(2))
+        ]);
+      });
+      rows.push([]);
+      const totalCubierto = items.reduce((s, i) => s + i.montoCubierto, 0);
+      rows.push(['TOTAL CUBIERTO', totalCubierto, '', '', '', '', 'COMISIÓN TOTAL', parseFloat(totalComision.toFixed(2))]);
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:24},{wch:22},{wch:10},{wch:14}];
+      XLSX.utils.book_append_sheet(wb, ws, 'Comision');
+      XLSX.writeFile(wb, 'comision_empresa_' + mesLabel.replace(/\s+/g,'_') + '.xlsx');
+    };
+  }
 
   const btnPagar = document.getElementById('btn-pagar-comision');
   if (btnPagar) {
