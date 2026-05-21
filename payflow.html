@@ -1050,7 +1050,7 @@ async function renderPagosClientes() {
 async function renderClientes() {
   const [cliRes, profRes] = await Promise.all([
     db.from('clientes_importados').select('*').order('nombre', { ascending: true }),
-    db.from('profiles').select('id, nombre, email').eq('rol', 'cliente'),
+    db.from('profiles').select('id, nombre, email').eq('rol', 'cliente').neq('activo', false),
   ]);
   const clientes = cliRes.data || [];
   const profiles = profRes.data || [];
@@ -1480,7 +1480,14 @@ async function agregarLineaCliente() {
   const profs = profiles || [];
 
   function showDropdown(q) {
-    const filtered = q ? profs.filter(p => p.nombre.toLowerCase().includes(q.toLowerCase())) : profs;
+    const usedIds = new Set(
+      Array.from(document.querySelectorAll('[id^="linea-"][id$="-cli"]'))
+        .filter(el => el.id !== id + '-cli')
+        .map(el => el.value)
+        .filter(v => v)
+    );
+    const base = profs.filter(p => !usedIds.has(p.id));
+    const filtered = q ? base.filter(p => p.nombre.toLowerCase().includes(q.toLowerCase())) : base;
     if (!filtered.length) { dropEl.style.display = 'none'; return; }
     dropEl.innerHTML = filtered.map(p =>
       '<div data-id="' + p.id + '" data-nombre="' + esc(p.nombre) + '" style="padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:0.5px solid var(--border)">' + esc(p.nombre) + '</div>'
@@ -1676,7 +1683,7 @@ async function renderIntHistorial(desde, hasta) {
     btnFilter.onclick = function() {
       const d = document.getElementById('hist-desde')?.value;
       const h = document.getElementById('hist-hasta')?.value;
-      if (d && h) renderIntHistorial(d + 'T00:00:00', h + 'T23:59:59');
+      if (d && h) renderIntHistorial(new Date(d + 'T00:00:00').toISOString(), new Date(h + 'T23:59:59').toISOString());
     };
   }
 }
