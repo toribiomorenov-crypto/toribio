@@ -1024,12 +1024,7 @@ function calcularDemoraEnvioTexto(envio, pagos) {
 
 // ── EMPRESA: PAGOS CLIENTES ──
 async function renderPagosClientes() {
-  const [pagRes, envRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
-    db.from('envios_intermediario').select('*, detalle_envio(cliente_profile_id, monto)').order('created_at', { ascending: true }),
-  ]);
-  const pagos = pagRes.data || [];
-  const allEnvios = envRes.data || [];
+  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false });
   const c = document.getElementById('main-content');
   const estadoLabel = { pendiente: 'Pendiente', confirmado: 'Confirmado', cancelado: 'Cancelado' };
   const estadoBadge = { confirmado: 'badge-confirmed', pendiente: 'badge-pending', cancelado: 'badge-late' };
