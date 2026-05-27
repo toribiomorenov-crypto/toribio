@@ -1257,19 +1257,7 @@ async function abrirDetalleSaldo(codigo) {
   const saldoColor = (cl.saldo || 0) > 0 ? 'var(--red)' : 'var(--green)';
   const fechaLabel = cl.saldo_at ? 'Al ' + new Date(cl.saldo_at).toLocaleDateString('es-AR') : '';
 
-  let html = '<div class="modal-title" style="margin-bottom:16px">Estado de cuenta — ' + esc(cl.nombre) + '</div>';
-
-  // Resumen de saldo (si existe)
-  if (cl.saldo != null) {
-    html +=
-      '<div class="card" style="margin-bottom:16px;box-shadow:none">' +
-      '<div class="data-row"><span class="data-label">Saldo inicial</span><span class="data-value">USD ' + fmt(cl.saldo_inicial || 0) + '</span></div>' +
-      '<div class="data-row"><span class="data-label">Movimientos del período</span><span class="data-value">USD ' + fmt(cl.movimientos || 0) + '</span></div>' +
-      '<div class="data-row" style="background:var(--surface2)">' +
-      '<span class="data-label" style="font-weight:600">Saldo total</span>' +
-      '<span class="data-value" style="color:' + saldoColor + ';font-size:16px">USD ' + fmt(cl.saldo) + '</span>' +
-      '</div></div>';
-  }
+  let html = '<div class="modal-title" style="margin-bottom:16px">Facturas pendientes — ' + esc(cl.nombre) + '</div>';
 
   // Tabla de facturas pendientes
   if (facturas && facturas.length > 0) {
