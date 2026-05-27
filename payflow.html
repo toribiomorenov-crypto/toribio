@@ -1051,11 +1051,13 @@ async function renderPagosClientes() {
 
 // ── EMPRESA: CLIENTES ──
 async function renderClientes() {
-  const [cliRes, profRes] = await Promise.all([
+  const [cliRes, profRes, syncRes] = await Promise.all([
     db.from('clientes_importados').select('*').order('nombre', { ascending: true }),
     db.from('profiles').select('id, nombre, email').eq('rol', 'cliente').neq('activo', false),
+    db.from('facturas_pendientes').select('synced_at').order('synced_at', { ascending: false }).limit(1).maybeSingle(),
   ]);
   const clientes = cliRes.data || [];
+  const lastSyncedAt = syncRes.data?.synced_at || null;
   const profiles = profRes.data || [];
   const clientesConAcceso = new Set(profiles.map(p => p.nombre.toUpperCase().trim()));
 
@@ -1065,11 +1067,18 @@ async function renderClientes() {
 
   const c = document.getElementById('main-content');
 
-  let html = '<div style="display:flex;gap:8px;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;">';
+  const syncLabel = lastSyncedAt
+    ? 'Sincronizado ' + new Date(lastSyncedAt).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+    : 'Sin sincronizar';
+
+  let html = '<div style="display:flex;gap:8px;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;align-items:center;">';
   html += '<input class="form-input" type="text" id="buscar-cliente" placeholder="Buscar cliente..." style="max-width:280px;"/>';
-  html += '<div style="display:flex;gap:8px;">';
-  html += '<button class="btn" id="btn-sync-saldos">↻ Actualizar saldos</button>';
-  html += '<button class="btn" id="btn-import-excel">Importar desde Excel</button>';
+  html += '<div style="display:flex;gap:8px;align-items:center;">';
+  html += '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">';
+  html += '<button class="btn" id="btn-sync-saldos" style="white-space:nowrap">↻ Actualizar datos</button>';
+  html += '<span style="font-size:10px;color:var(--text3);font-family:\'DM Mono\',monospace">' + esc(syncLabel) + '</span>';
+  html += '</div>';
+  html += '<button class="btn" id="btn-import-excel">Importar Excel</button>';
   html += '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls"/>';
   html += '<button class="btn btn-primary" id="btn-nuevo-usuario">+ Crear usuario</button>';
   html += '</div></div>';
@@ -1169,21 +1178,39 @@ async function renderClientes() {
 }
 
 function abrirSyncSaldos() {
-  const OPPEN_URL = 'https://northtraders.oppen.io/oo/ui/home#/report/CustomerStatus';
+  const OPPEN_AR = 'https://northtraders.oppen.io/oo/ui/home#/report/AccReceivable';
+  const OPPEN_CS = 'https://northtraders.oppen.io/oo/ui/home#/report/CustomerStatus';
+
+  // Abrir öppen automáticamente en tab existente (o nueva si no hay)
+  window.open(OPPEN_AR, 'oppen-tab');
+
   const modal = document.getElementById('modal-overlay');
   const body  = document.getElementById('modal-body');
   body.innerHTML =
-    '<div class="modal-title" style="margin-bottom:12px">↻ Actualizar saldos desde Open Orange</div>' +
-    '<ol style="font-size:13px;line-height:1.8;color:var(--text2);padding-left:18px;margin-bottom:16px">' +
-    '<li>Abrí Open Orange en Estado de Cuenta</li>' +
-    '<li>Filtro Grupo: <strong>ECR</strong>, Nivel de Detalle: <strong>Detallado</strong></li>' +
-    '<li>Fecha desde: <strong>31/03/2026</strong> — hasta: cualquiera &gt; 6 meses</li>' +
-    '<li>Ejecutá el reporte y avisale a Claude para hacer la sincronización</li>' +
-    '</ol>' +
+    '<div class="modal-title" style="margin-bottom:4px">↻ Actualizar datos desde Open Orange</div>' +
+    '<p style="font-size:12px;color:var(--text3);margin-bottom:16px">Open Orange se abrió en otra pestaña · ~15 segundos</p>' +
+
+    '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;margin-bottom:16px">' +
+    '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px">Qué se va a sincronizar</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px">' +
+    '<div style="display:flex;align-items:center;gap:10px;font-size:13px">' +
+    '<span style="width:20px;height:20px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0">✓</span>' +
+    '<div><div style="font-weight:500">Saldos de cuenta</div><div style="font-size:11px;color:var(--text3)">Estado de Cuenta · Grupo ECR</div></div>' +
+    '</div>' +
+    '<div style="display:flex;align-items:center;gap:10px;font-size:13px">' +
+    '<span style="width:20px;height:20px;background:var(--green-bg);border:1px solid var(--green-border);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0">✓</span>' +
+    '<div><div style="font-weight:500">Facturas pendientes</div><div style="font-size:11px;color:var(--text3)">Cuentas a Cobrar · Grupo ECR</div></div>' +
+    '</div>' +
+    '</div></div>' +
+
+    '<div style="background:var(--amber-bg);border:1px solid var(--amber-border);border-radius:var(--radius);padding:12px 14px;margin-bottom:20px;font-size:13px;color:var(--amber)">' +
+    '💬 Decile a Claude <strong style="font-family:\'DM Mono\',monospace;background:rgba(0,0,0,.06);padding:1px 6px;border-radius:4px">sincronizar</strong> para que empiece automáticamente' +
+    '</div>' +
+
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Cerrar</button>' +
-    '<a href="' + OPPEN_URL + '" target="_blank" class="btn btn-primary" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Abrir Open Orange →</a>' +
     '</div>';
+
   modal.style.display = 'flex';
 }
 
