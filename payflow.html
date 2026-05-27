@@ -1241,7 +1241,7 @@ async function abrirSyncSaldos() {
 async function abrirDetalleSaldo(codigo) {
   const cl = window.__payflowClienteMap && window.__payflowClienteMap[codigo];
   if (!cl) return;
-  const OPPEN_URL = 'https://northtraders.oppen.io/oo/ui/home#/report/AccReceivable';
+  const OPPEN_URL = 'https://northtraders.oppen.io/oo/ui/home#/report/AccountReceivableAging';
   const modal = document.getElementById('modal-overlay');
   const body = document.getElementById('modal-body');
 
@@ -1261,7 +1261,8 @@ async function abrirDetalleSaldo(codigo) {
 
   // Tabla de facturas pendientes
   if (facturas && facturas.length > 0) {
-    const totalVencido = facturas.filter(f => f.dias_vencidos > 0).reduce((s,f) => s + Number(f.saldo), 0);
+    // dias_vencidos: negative = overdue by N days, 0 = due today, positive = due in N days
+    const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s,f) => s + Number(f.saldo), 0);
     html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">' +
       'Facturas pendientes (' + facturas.length + ')' +
       (totalVencido > 0 ? ' &nbsp;·&nbsp; <span style="color:var(--red)">USD ' + fmt(totalVencido) + ' vencido</span>' : '') +
@@ -1273,18 +1274,20 @@ async function abrirDetalleSaldo(codigo) {
       '<th style="text-align:left;padding:6px 4px;font-weight:500">Vto.</th>' +
       '<th style="text-align:right;padding:6px 4px;font-weight:500">Total</th>' +
       '<th style="text-align:right;padding:6px 4px;font-weight:500">Saldo</th>' +
-      '<th style="text-align:right;padding:6px 4px;font-weight:500">Días</th>' +
+      '<th style="text-align:right;padding:6px 4px;font-weight:500">Estado</th>' +
       '</tr></thead><tbody>';
     facturas.forEach(function(f) {
-      const vencido = f.dias_vencidos > 0;
+      const dias = f.dias_vencidos != null ? f.dias_vencidos : null;
+      const vencido = dias != null && dias <= 0;
       const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
+      const diasLabel = dias == null ? '-' : dias === 0 ? 'HOY' : dias < 0 ? Math.abs(dias) + 'd atrás' : 'en ' + dias + 'd';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:7px 4px;color:var(--text2)">' + esc(f.tipo || '-') + '</td>' +
         '<td style="padding:7px 4px;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--blue)">' + esc(f.nro_oficial || '-') + '</td>' +
         '<td style="padding:7px 4px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + '">' + fVto + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace">USD ' + fmt(f.total || 0) + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
-        '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + (f.dias_vencidos || 0) + 'd</td>' +
+        '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + diasLabel + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -2125,7 +2128,8 @@ async function renderCliHome() {
   // Card de facturas pendientes (solo si hay datos)
   const facturas = facturasRes.data || [];
   if (facturas.length > 0) {
-    const totalVencido = facturas.filter(f => f.dias_vencidos > 0).reduce((s,f) => s + Number(f.saldo), 0);
+    // dias_vencidos: negative = overdue by N days, 0 = due today, positive = due in N days
+    const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s,f) => s + Number(f.saldo), 0);
     const totalPendiente = facturas.reduce((s,f) => s + Number(f.saldo), 0);
     html += '<div class="card" style="margin-top:16px">';
     html += '<div class="card-header"><div class="card-title">Facturas pendientes</div>';
@@ -2137,17 +2141,19 @@ async function renderCliHome() {
       '<th style="text-align:left;padding:8px 4px;font-weight:500">Nro</th>' +
       '<th style="text-align:left;padding:8px 4px;font-weight:500">Vencimiento</th>' +
       '<th style="text-align:right;padding:8px 14px;font-weight:500">Saldo</th>' +
-      '<th style="text-align:right;padding:8px 14px;font-weight:500">Días</th>' +
+      '<th style="text-align:right;padding:8px 14px;font-weight:500">Estado</th>' +
       '</tr></thead><tbody>';
     facturas.forEach(function(f) {
-      const vencido = f.dias_vencidos > 0;
+      const dias = f.dias_vencidos != null ? f.dias_vencidos : null;
+      const vencido = dias != null && dias <= 0;
       const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
+      const diasLabel = dias == null ? '-' : dias === 0 ? 'HOY' : dias < 0 ? Math.abs(dias) + 'd atrás' : 'en ' + dias + 'd';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:9px 14px;color:var(--text2)">' + esc(f.tipo || '-') + '</td>' +
         '<td style="padding:9px 4px;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--blue)">' + esc(f.nro_oficial || '-') + '</td>' +
         '<td style="padding:9px 4px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + '">' + fVto + '</td>' +
         '<td style="padding:9px 14px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
-        '<td style="padding:9px 14px;text-align:right;font-family:\'DM Mono\',monospace;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + (f.dias_vencidos || 0) + 'd</td>' +
+        '<td style="padding:9px 14px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + diasLabel + '</td>' +
         '</tr>';
     });
     html += '</tbody></table>';
