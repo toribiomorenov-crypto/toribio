@@ -102,6 +102,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .btn-confirm:hover{background:var(--blue);color:#fff;}
 .btn-sm{padding:5px 10px;font-size:11px;}
 .btn:disabled{opacity:.35;cursor:not-allowed;}
+.active-pill{background:var(--text)!important;color:#fff!important;border-color:var(--text)!important;}
 .data-row{display:flex;justify-content:space-between;align-items:center;padding:12px 18px;border-bottom:1px solid var(--border);font-size:13px;}
 .data-row:last-child{border-bottom:none;}
 .data-label{color:var(--text2);}
@@ -402,6 +403,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
   </div>
 </div>
 
+
+<!-- MODAL: Genérico (sync saldos, detalle saldo, etc.) -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal" id="modal-body" style="max-width:480px"></div>
+</div>
 
 <script>
 const SUPA_URL = 'https://lgrbdzutcoejdyymquku.supabase.co';
@@ -1053,6 +1059,10 @@ async function renderClientes() {
   const profiles = profRes.data || [];
   const clientesConAcceso = new Set(profiles.map(p => p.nombre.toUpperCase().trim()));
 
+  // Store para acceso rápido desde onclick
+  window.__payflowClienteMap = {};
+  clientes.forEach(function(cl) { window.__payflowClienteMap[cl.codigo] = cl; });
+
   const c = document.getElementById('main-content');
 
   let html = '<div style="display:flex;gap:8px;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;">';
@@ -1063,6 +1073,17 @@ async function renderClientes() {
   html += '<input type="file" id="import-file" style="display:none" accept=".xlsx,.xls"/>';
   html += '<button class="btn btn-primary" id="btn-nuevo-usuario">+ Crear usuario</button>';
   html += '</div></div>';
+
+  // Pills de filtro por grupo
+  const grupos = [...new Set(clientes.filter(function(c){ return c.grupo; }).map(function(c){ return c.grupo; }))].sort();
+  if (grupos.length > 0) {
+    html += '<div id="grupo-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+    html += '<button class="btn btn-sm grupo-pill active-pill" data-grupo="" style="border-radius:20px;padding:4px 12px">Todos</button>';
+    grupos.forEach(function(g) {
+      html += '<button class="btn btn-sm grupo-pill" data-grupo="' + esc(g) + '" style="border-radius:20px;padding:4px 12px">' + esc(g) + '</button>';
+    });
+    html += '</div>';
+  }
 
   if (clientes.length === 0) {
     html += '<div class="card"><div class="empty-state" style="padding:40px">';
@@ -1077,14 +1098,14 @@ async function renderClientes() {
       const perfil = profiles.find(function(p) { return p.nombre.toUpperCase().trim() === cl.nombre.toUpperCase().trim(); });
       const perfilId = perfil ? perfil.id : '';
 
-      html += '<div class="pago-row" data-cliente="' + esc(cl.nombre) + '">';
+      html += '<div class="pago-row" data-cliente="' + esc(cl.nombre) + '" data-grupo="' + esc(cl.grupo||'') + '">';
       html += '<div class="pago-avatar">' + esc(cl.nombre).substring(0,2).toUpperCase() + '</div>';
       html += '<div class="pago-info"><div class="pago-name">' + esc(cl.nombre) + '</div>';
       html += '<div class="pago-sub">Cod: ' + esc(cl.codigo||'-') + (perfil ? ' &middot; ' + esc(perfil.email) : '') + '</div></div>';
       if (cl.saldo != null) {
         const saldoColor = cl.saldo > 0 ? 'var(--red)' : 'var(--green)';
         const saldoFecha = cl.saldo_at ? new Date(cl.saldo_at).toLocaleDateString('es-AR') : '';
-        html += '<div style="text-align:right;margin-right:8px;min-width:90px;">';
+        html += '<div style="text-align:right;margin-right:8px;min-width:90px;cursor:pointer;padding:4px 6px;border-radius:6px;transition:background .1s" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'" onclick="abrirDetalleSaldo(\'' + esc(cl.codigo) + '\')" title="Ver detalle">';
         html += '<div style="font-size:13px;font-weight:600;color:' + saldoColor + '">USD ' + fmt(cl.saldo) + '</div>';
         if (saldoFecha) html += '<div style="font-size:10px;color:var(--text3)">' + saldoFecha + '</div>';
         html += '</div>';
@@ -1120,17 +1141,31 @@ async function renderClientes() {
     btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
   });
 
-  // Search filter
+  // Filtro combinado: texto + grupo
+  function filtrarClientesRows() {
+    const q = (document.getElementById('buscar-cliente')?.value || '').toLowerCase().trim();
+    const activeBtn = document.querySelector('.grupo-pill.active-pill');
+    const g = activeBtn ? activeBtn.getAttribute('data-grupo') : '';
+    document.querySelectorAll('.pago-row[data-cliente]').forEach(function(row) {
+      const matchNombre = !q || row.getAttribute('data-cliente').toLowerCase().includes(q);
+      const matchGrupo = !g || row.getAttribute('data-grupo') === g;
+      row.style.display = matchNombre && matchGrupo ? '' : 'none';
+    });
+  }
+
   const buscar = document.getElementById('buscar-cliente');
   if (buscar) {
-    buscar.oninput = function() {
-      const q = this.value.toLowerCase().trim();
-      document.querySelectorAll('.pago-row[data-cliente]').forEach(function(row) {
-        row.style.display = row.getAttribute('data-cliente').toLowerCase().includes(q) ? '' : 'none';
-      });
-    };
+    buscar.oninput = filtrarClientesRows;
     buscar.focus();
   }
+
+  document.querySelectorAll('.grupo-pill').forEach(function(pill) {
+    pill.onclick = function() {
+      document.querySelectorAll('.grupo-pill').forEach(function(p) { p.classList.remove('active-pill'); });
+      this.classList.add('active-pill');
+      filtrarClientesRows();
+    };
+  });
 }
 
 function abrirSyncSaldos() {
@@ -1148,6 +1183,32 @@ function abrirSyncSaldos() {
     '<div style="display:flex;gap:8px;justify-content:flex-end">' +
     '<button class="btn" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Cerrar</button>' +
     '<a href="' + OPPEN_URL + '" target="_blank" class="btn btn-primary" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Abrir Open Orange →</a>' +
+    '</div>';
+  modal.style.display = 'flex';
+}
+
+function abrirDetalleSaldo(codigo) {
+  const cl = window.__payflowClienteMap && window.__payflowClienteMap[codigo];
+  if (!cl || cl.saldo == null) return;
+  const OPPEN_URL = 'https://northtraders.oppen.io/oo/ui/home#/report/CustomerStatus';
+  const saldoColor = cl.saldo > 0 ? 'var(--red)' : 'var(--green)';
+  const fechaLabel = cl.saldo_at ? 'Al ' + new Date(cl.saldo_at).toLocaleDateString('es-AR') : 'Fecha no disponible';
+  const modal = document.getElementById('modal-overlay');
+  const body = document.getElementById('modal-body');
+  body.innerHTML =
+    '<div class="modal-title" style="margin-bottom:16px">Estado de cuenta — ' + esc(cl.nombre) + '</div>' +
+    '<div class="card" style="margin-bottom:14px;box-shadow:none">' +
+    '<div class="data-row"><span class="data-label">Saldo inicial</span><span class="data-value">USD ' + fmt(cl.saldo_inicial || 0) + '</span></div>' +
+    '<div class="data-row"><span class="data-label">Movimientos del período</span><span class="data-value">USD ' + fmt(cl.movimientos || 0) + '</span></div>' +
+    '<div class="data-row" style="background:var(--surface2);border-radius:0 0 var(--radius) var(--radius)">' +
+    '<span class="data-label" style="font-weight:600">Saldo actual</span>' +
+    '<span class="data-value" style="color:' + saldoColor + ';font-size:16px">USD ' + fmt(cl.saldo) + '</span>' +
+    '</div>' +
+    '</div>' +
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:16px">' + fechaLabel + ' · Para ver movimientos individuales, abrí el reporte en Open Orange.</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+    '<button class="btn" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Cerrar</button>' +
+    '<a href="' + OPPEN_URL + '" target="_blank" class="btn btn-primary" onclick="document.getElementById(\'modal-overlay\').style.display=\'none\'">Ver en Open Orange →</a>' +
     '</div>';
   modal.style.display = 'flex';
 }
