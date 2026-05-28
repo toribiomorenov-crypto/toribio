@@ -1321,7 +1321,7 @@ async function abrirSyncSaldos() {
   }
 }
 
-// Descarga el PDF de una factura desde el backend (que va a öppen via Puppeteer)
+// Descarga el PDF de una factura desde el backend (que va a öppen via API REST)
 // y lo abre en una pestaña nueva. Mientras descarga, muestra "Descargando..." en el link.
 async function descargarFactura(nroOficial, linkEl) {
   if (!nroOficial || !linkEl) return;
@@ -2283,9 +2283,11 @@ async function renderComisionEmpresa(year, month) {
 
 // ── CLIENTE: HOME ──
 async function renderCliHome() {
-  // Buscar facturas por nombre del cliente (case-insensitive con trim)
-  // — no depende de que clientes_importados tenga el codigo vinculado
-  const nombreCliente = (currentProfile.nombre || '').trim();
+  // Buscar facturas por nombre del cliente (case-insensitive con trim).
+  // Escapamos wildcards SQL LIKE (% y _) para evitar que un nombre con esos
+  // caracteres matchee facturas de otros clientes.
+  // No depende de que clientes_importados tenga el codigo vinculado.
+  const nombreCliente = (currentProfile.nombre || '').trim().replace(/[%_\\]/g, '\\$&');
   const [pagosRes, facturasRes] = await Promise.all([
     db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false }),
     nombreCliente
