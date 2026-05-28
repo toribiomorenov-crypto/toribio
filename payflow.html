@@ -2112,26 +2112,32 @@ async function renderComisionEmpresa(year, month) {
 
 // ── CLIENTE: HOME ──
 async function renderCliHome() {
-  const [pagosRes, saldoRes] = await Promise.all([
+  // Buscar facturas por nombre del cliente (case-insensitive con trim)
+  // — no depende de que clientes_importados tenga el codigo vinculado
+  const nombreCliente = (currentProfile.nombre || '').trim();
+  const [pagosRes, facturasRes] = await Promise.all([
     db.from('pagos_cliente').select('*').eq('cliente_profile_id', currentUser.id).order('created_at', { ascending: false }),
-    db.from('clientes_importados').select('saldo, saldo_at, codigo').eq('nombre', currentProfile.nombre).maybeSingle(),
+    nombreCliente
+      ? db.from('facturas_pendientes').select('*').ilike('cliente_nombre', nombreCliente).order('fecha_vto', { ascending: true })
+      : Promise.resolve({ data: [] }),
   ]);
-  const clienteCodigo = saldoRes.data?.codigo;
-  const facturasRes = clienteCodigo
-    ? await db.from('facturas_pendientes').select('*').eq('cliente_codigo', clienteCodigo).order('fecha_vto', { ascending: true })
-    : { data: [] };
 
   const lista = pagosRes.data || [];
   const activos = lista.filter(p => p.estado !== 'cancelado');
   const totalInformado = activos.reduce((s,p) => s + Number(p.monto), 0);
   const confirmados = activos.filter(p => p.estado === 'confirmado').length;
   const pendientes = activos.filter(p => p.estado === 'pendiente').length;
-  const saldoData = saldoRes.data;
 
-  const saldoMetric = saldoData && saldoData.saldo != null
+  // Saldo y datos de facturas computados desde facturas_pendientes
+  const facturas = facturasRes.data || [];
+  const saldoTotal = facturas.reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const ultimaSync = facturas[0]?.synced_at;
+
+  const saldoMetric = facturas.length > 0
     ? '<div class="metric"><div class="metric-label">Saldo pendiente</div>' +
-      '<div class="metric-value ' + (saldoData.saldo > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoData.saldo) + '</div>' +
-      '<div class="metric-sub">' + (saldoData.saldo_at ? 'Al ' + new Date(saldoData.saldo_at).toLocaleDateString('es-AR') : 'Open Orange') + '</div></div>'
+      '<div class="metric-value ' + (saldoTotal > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoTotal) + '</div>' +
+      '<div class="metric-sub">' + (ultimaSync ? 'Al ' + new Date(ultimaSync).toLocaleDateString('es-AR') : 'Open Orange') + '</div></div>'
     : '';
 
   const c = document.getElementById('main-content');
@@ -2165,33 +2171,26 @@ async function renderCliHome() {
       }).join('')
     ) + '</div>';
 
-  // Card de facturas pendientes (siempre visible)
-  const facturas = facturasRes.data || [];
-  const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s,f) => s + Number(f.saldo), 0);
-
+  // ── Card de facturas pendientes (prolijo y espacioso) ──
   html += '<div class="card" style="margin-top:16px">';
-  html += '<div class="card-header"><div class="card-title">Mis facturas pendientes' + (facturas.length > 0 ? ' (' + facturas.length + ')' : '') + '</div>';
-  if (totalVencido > 0) html += '<span class="badge badge-late">USD ' + fmt(totalVencido) + ' vencido</span>';
+  html += '<div class="card-header" style="padding:18px 20px"><div class="card-title" style="font-size:15px">Mis facturas pendientes' + (facturas.length > 0 ? ' <span style="color:var(--text3);font-weight:400">(' + facturas.length + ')</span>' : '') + '</div>';
+  if (totalVencido > 0) html += '<span class="badge badge-late" style="font-size:12px;padding:5px 10px">USD ' + fmt(totalVencido) + ' vencido</span>';
   html += '</div>';
 
-  if (!clienteCodigo) {
-    // El usuario cliente no está vinculado a un registro de öppen todavía
-    html += '<div class="empty-state" style="padding:24px;color:var(--text3);text-align:center;font-size:13px">' +
-      'Tu cuenta todavía no está vinculada con tu ficha de öppen.<br/>' +
-      'Avisanos para que la conectemos y veas tus facturas acá.' +
-      '</div>';
-  } else if (facturas.length === 0) {
-    html += '<div class="empty-state" style="padding:24px;color:var(--text3);text-align:center;font-size:13px">' +
-      'No tenés facturas pendientes. ' +
+  if (facturas.length === 0) {
+    html += '<div class="empty-state" style="padding:36px 20px;color:var(--text3);text-align:center;font-size:14px">' +
+      'No tenés facturas pendientes. 🎉' +
       '</div>';
   } else {
-    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse">';
-    html += '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border)">' +
-      '<th style="text-align:left;padding:8px 14px;font-weight:500">Nro</th>' +
-      '<th style="text-align:left;padding:8px 4px;font-weight:500">Fecha</th>' +
-      '<th style="text-align:left;padding:8px 4px;font-weight:500">Vencimiento</th>' +
-      '<th style="text-align:right;padding:8px 14px;font-weight:500">Saldo</th>' +
-      '<th style="text-align:right;padding:8px 14px;font-weight:500">Estado</th>' +
+    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">';
+    html += '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+      '<th style="text-align:left;padding:12px 20px;font-weight:600">Tipo</th>' +
+      '<th style="text-align:left;padding:12px 8px;font-weight:600">Nro</th>' +
+      '<th style="text-align:left;padding:12px 8px;font-weight:600">Fecha</th>' +
+      '<th style="text-align:left;padding:12px 8px;font-weight:600">Vencimiento</th>' +
+      '<th style="text-align:right;padding:12px 16px;font-weight:600">Total</th>' +
+      '<th style="text-align:right;padding:12px 16px;font-weight:600">Saldo</th>' +
+      '<th style="text-align:right;padding:12px 20px;font-weight:600">Estado</th>' +
       '</tr></thead><tbody>';
     facturas.forEach(function(f) {
       const dias = f.dias_vencidos != null ? f.dias_vencidos : null;
@@ -2200,19 +2199,21 @@ async function renderCliHome() {
       const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
       const diasLabel = dias == null ? '-' : dias === 0 ? 'HOY' : dias < 0 ? Math.abs(dias) + 'd atrás' : 'en ' + dias + 'd';
       const nroCell = f.nro_oficial
-        ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>'
+        ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:12px" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>'
         : '<span style="color:var(--text3)">-</span>';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:9px 14px;font-family:\'DM Mono\',monospace;font-size:11px">' + nroCell + '</td>' +
-        '<td style="padding:9px 4px;color:var(--text2)">' + fFact + '</td>' +
-        '<td style="padding:9px 4px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + '">' + fVto + '</td>' +
-        '<td style="padding:9px 14px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
-        '<td style="padding:9px 14px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + diasLabel + '</td>' +
+        '<td style="padding:14px 20px;color:var(--text2)">' + esc(f.tipo || '-') + '</td>' +
+        '<td style="padding:14px 8px">' + nroCell + '</td>' +
+        '<td style="padding:14px 8px;color:var(--text2)">' + fFact + '</td>' +
+        '<td style="padding:14px 8px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + ';font-weight:' + (vencido ? '600' : '400') + '">' + fVto + '</td>' +
+        '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--text2)">USD ' + fmt(f.total || 0) + '</td>' +
+        '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+        '<td style="padding:14px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-size:12px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green);font-weight:600') + '">' + diasLabel + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
-    if (saldoRes.data?.saldo_at) {
-      html += '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Al ' + new Date(saldoRes.data.saldo_at).toLocaleDateString('es-AR') + ' · Sincronizado desde Open Orange</div>';
+    if (ultimaSync) {
+      html += '<div style="padding:12px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">Al ' + new Date(ultimaSync).toLocaleDateString('es-AR') + ' · Sincronizado desde Open Orange</div>';
     }
   }
   html += '</div>';
