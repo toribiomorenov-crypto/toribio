@@ -1406,7 +1406,7 @@ async function abrirDetalleSaldo(codigo) {
       const diasLabel = dias == null ? '-' : dias === 0 ? 'HOY' : dias < 0 ? Math.abs(dias) + 'd atrás' : 'en ' + dias + 'd';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:7px 4px;color:var(--text2)">' + esc(f.tipo || '-') + '</td>' +
-        '<td style="padding:7px 4px;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text2)" title="Descarga de PDF próximamente disponible">' + esc(f.nro_oficial || '-') + '</td>' +
+        '<td style="padding:7px 4px;font-family:\'DM Mono\',monospace;font-size:11px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
         '<td style="padding:7px 4px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + '">' + fVto + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace">USD ' + fmt(f.total || 0) + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
@@ -2282,7 +2282,7 @@ async function renderCliHome() {
       const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
       const diasLabel = dias == null ? '-' : dias === 0 ? 'HOY' : dias < 0 ? Math.abs(dias) + 'd atrás' : 'en ' + dias + 'd';
       const nroCell = f.nro_oficial
-        ? '<span style="font-family:\'DM Mono\',monospace;font-size:12px;color:var(--text2)" title="Descarga de PDF próximamente disponible">' + esc(f.nro_oficial) + '</span>'
+        ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:12px" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>'
         : '<span style="color:var(--text3)">-</span>';
       html += '<tr style="border-bottom:1px solid var(--border)">' +
         '<td style="padding:14px 20px;color:var(--text2)">' + esc(f.tipo || '-') + '</td>' +
