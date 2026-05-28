@@ -755,13 +755,15 @@ async function loadView(id) {
 
 // ── EMPRESA: DASHBOARD ──
 async function renderDashboard() {
-  const [pagCliRes, enviosRes] = await Promise.all([
+  const [pagCliRes, enviosRes, facturasRes] = await Promise.all([
     db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*)').order('created_at', { ascending: false }),
+    db.from('facturas_pendientes').select('*').order('dias_vencidos', { ascending: true }),
   ]);
 
   const pagos = pagCliRes.data || [];
   const envios = enviosRes.data || [];
+  const facturas = facturasRes.data || [];
 
   const totalRecibidoClientes = pagos.filter(p=>p.estado==='confirmado').reduce((s,p) => s + Number(p.monto), 0);
   const totalEnviadoEmpresa = envios.reduce((s,e) => s + Number(e.monto_total), 0);
@@ -769,6 +771,14 @@ async function renderDashboard() {
   const pendientesConfirmar = pagos.filter(p => p.estado === 'pendiente').length;
   const enviosPendConf = envios.filter(e => e.confirmado !== true);
   const montoEnviosPend = enviosPendConf.reduce((s,e) => s + Number(e.monto_total), 0);
+
+  // ── Cobranzas: vencidas + próximas a vencer (7 días) ──
+  const vencidas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos <= 0);
+  const proximas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos > 0 && f.dias_vencidos <= 7);
+  const totalVencidoUsd = vencidas.reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const totalProximasUsd = proximas.reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const clientesVencidos = new Set(vencidas.map(f => f.cliente_codigo)).size;
+  const ultimaSyncFacturas = facturas[0]?.synced_at;
 
   // Calcular promedio: para cada pago confirmado, buscar el primer envio posterior del cliente
   let tiempos = [];
@@ -787,10 +797,81 @@ async function renderDashboard() {
   const promedioLabel = promedioDias === null ? 'Sin datos' : promedioDias < 1 ? Math.round(promedioHoras) + 'hs' : promedioDias.toFixed(1) + 'd';
   const promedioOk = promedioDias !== null && promedioDias <= 3;
 
+  // ── Construir bloque de cobranzas ──
+  let cobranzasHtml = '';
+  if (vencidas.length > 0 || proximas.length > 0) {
+    cobranzasHtml += '<div class="card section-gap"><div class="card-header">' +
+      '<div class="card-title">Cobranzas — facturas vencidas</div>' +
+      (vencidas.length > 0
+        ? '<span class="badge badge-late">USD ' + fmt(totalVencidoUsd) + ' · ' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' de ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</span>'
+        : '<span class="badge badge-released">Sin vencidas ✓</span>'
+      ) +
+      '</div>';
+
+    if (vencidas.length === 0) {
+      cobranzasHtml += '<div class="empty-state" style="padding:24px;color:var(--text3);font-size:13px">No hay facturas vencidas en este momento. 🎉</div>';
+    } else {
+      cobranzasHtml += '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">';
+      cobranzasHtml += '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+        '<th style="text-align:left;padding:10px 20px;font-weight:600">Cliente</th>' +
+        '<th style="text-align:left;padding:10px 8px;font-weight:600">Nro</th>' +
+        '<th style="text-align:left;padding:10px 8px;font-weight:600">Vencimiento</th>' +
+        '<th style="text-align:right;padding:10px 16px;font-weight:600">Días atrás</th>' +
+        '<th style="text-align:right;padding:10px 20px;font-weight:600">Saldo</th>' +
+        '</tr></thead><tbody>';
+      const TOP = 20;
+      vencidas.slice(0, TOP).forEach(function(f) {
+        const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
+        const dias = f.dias_vencidos;
+        const diasLabel = dias === 0 ? 'HOY' : Math.abs(dias) + 'd';
+        cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:11px 20px"><div style="font-weight:600;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</div><div style="font-size:11px;color:var(--text3);font-family:\'DM Mono\',monospace">' + esc(f.cliente_codigo || '') + '</div></td>' +
+          '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:11px 8px;color:var(--red);font-weight:500">' + fVto + '</td>' +
+          '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--red);font-weight:700">' + diasLabel + '</td>' +
+          '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '</tr>';
+      });
+      cobranzasHtml += '</tbody></table></div>';
+      if (vencidas.length > TOP) {
+        cobranzasHtml += '<div style="padding:12px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">+ ' + (vencidas.length - TOP) + ' factura' + (vencidas.length - TOP !== 1 ? 's' : '') + ' vencida' + (vencidas.length - TOP !== 1 ? 's' : '') + ' más · <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="loadView(\'clientes\')">Ver en Clientes →</span></div>';
+      }
+    }
+
+    // Sub-bloque: próximas a vencer (7 días)
+    if (proximas.length > 0) {
+      cobranzasHtml += '<div style="padding:14px 20px;border-top:2px solid var(--border);background:var(--surface2)">' +
+        '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Próximas a vencer (≤ 7 días) · USD ' + fmt(totalProximasUsd) + ' · ' + proximas.length + ' factura' + (proximas.length!==1?'s':'') + '</div>';
+      cobranzasHtml += '<div style="overflow-x:auto"><table style="width:100%;font-size:12px;border-collapse:collapse">';
+      proximas.slice(0, 10).forEach(function(f) {
+        const fVto = f.fecha_vto ? new Date(f.fecha_vto + 'T00:00:00').toLocaleDateString('es-AR') : '-';
+        const diasLabel = f.dias_vencidos === 0 ? 'HOY' : 'en ' + f.dias_vencidos + 'd';
+        cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
+          '<td style="padding:7px 0;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</td>' +
+          '<td style="padding:7px 0;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:7px 0;color:var(--text2)">' + fVto + '</td>' +
+          '<td style="padding:7px 8px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text3)">' + diasLabel + '</td>' +
+          '<td style="padding:7px 0;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--text)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '</tr>';
+      });
+      cobranzasHtml += '</table></div>';
+      if (proximas.length > 10) {
+        cobranzasHtml += '<div style="margin-top:8px;font-size:11px;color:var(--text3)">+ ' + (proximas.length - 10) + ' más</div>';
+      }
+      cobranzasHtml += '</div>';
+    }
+
+    if (ultimaSyncFacturas) {
+      cobranzasHtml += '<div style="padding:10px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">Al ' + new Date(ultimaSyncFacturas).toLocaleString('es-AR') + ' · Sincronizado desde Open Orange</div>';
+    }
+    cobranzasHtml += '</div>';
+  }
+
   const c = document.getElementById('main-content');
   c.innerHTML =
     (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aún no fueron enviados a la empresa.</div></div>' : '') +
     '<div class="metrics">' +
+    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value ' + (totalVencidoUsd > 0 ? 'danger' : 'ok') + '">USD ' + fmt(totalVencidoUsd) + '</div><div class="metric-sub">' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' · ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</div></div>' +
     '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido − enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
@@ -801,6 +882,8 @@ async function renderDashboard() {
       '<div style="display:flex;align-items:center;gap:10px"><span class="alert-icon">!</span><span><strong>' + enviosPendConf.length + ' envío' + (enviosPendConf.length>1?'s':'') + ' sin confirmar</strong> — USD ' + fmt(montoEnviosPend) + ' pendiente de acreditar</span></div>' +
       '<button class="btn btn-primary btn-sm" onclick="loadView(\'control-intermediario\')">Confirmar ahora →</button>' +
       '</div>' : '') +
+
+    cobranzasHtml +
 
     '<div class="grid-2 section-gap">' +
 
