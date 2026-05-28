@@ -826,7 +826,7 @@ async function renderDashboard() {
         const diasLabel = dias === 0 ? 'HOY' : Math.abs(dias) + 'd';
         cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
           '<td style="padding:11px 20px"><div style="font-weight:600;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</div><div style="font-size:11px;color:var(--text3);font-family:\'DM Mono\',monospace">' + esc(f.cliente_codigo || '') + '</div></td>' +
-          '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:11px 8px;color:var(--red);font-weight:500">' + fVto + '</td>' +
           '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--red);font-weight:700">' + diasLabel + '</td>' +
           '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
@@ -848,7 +848,7 @@ async function renderDashboard() {
         const diasLabel = f.dias_vencidos === 0 ? 'HOY' : 'en ' + f.dias_vencidos + 'd';
         cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
           '<td style="padding:7px 0;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</td>' +
-          '<td style="padding:7px 0;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:7px 0;font-family:\'DM Mono\',monospace;font-size:11px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:7px 0;color:var(--text2)">' + fVto + '</td>' +
           '<td style="padding:7px 8px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text3)">' + diasLabel + '</td>' +
           '<td style="padding:7px 0;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--text)">USD ' + fmt(f.saldo || 0) + '</td>' +
@@ -1688,7 +1688,7 @@ async function renderIntHome() {
         const diasLabel = dias === 0 ? 'HOY' : Math.abs(dias) + 'd';
         cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
           '<td style="padding:11px 20px"><div style="font-weight:600;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</div><div style="font-size:11px;color:var(--text3);font-family:\'DM Mono\',monospace">' + esc(f.cliente_codigo || '') + '</div></td>' +
-          '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:11px 8px;color:var(--red);font-weight:500">' + fVto + '</td>' +
           '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--red);font-weight:700">' + diasLabel + '</td>' +
           '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
@@ -1710,7 +1710,7 @@ async function renderIntHome() {
         const diasLabel = f.dias_vencidos === 0 ? 'HOY' : 'en ' + f.dias_vencidos + 'd';
         cobranzasHtml += '<tr style="border-bottom:1px solid var(--border)">' +
           '<td style="padding:7px 0;color:var(--text)">' + esc(f.cliente_nombre || '-') + '</td>' +
-          '<td style="padding:7px 0;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text2)">' + esc(f.nro_oficial || '-') + '</td>' +
+          '<td style="padding:7px 0;font-family:\'DM Mono\',monospace;font-size:11px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:7px 0;color:var(--text2)">' + fVto + '</td>' +
           '<td style="padding:7px 8px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;color:var(--text3)">' + diasLabel + '</td>' +
           '<td style="padding:7px 0;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--text)">USD ' + fmt(f.saldo || 0) + '</td>' +
