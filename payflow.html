@@ -952,7 +952,7 @@ async function renderControlIntermediario() {
         '<div class="pago-sub">' + new Date(e.created_at).toLocaleString('es-AR') + ' · ' + det.length + ' cliente(s)</div>' +
         '</div>' +
         '<div class="pago-amount">USD ' + fmt(e.monto_total) + '</div>' +
-        (e.comprobante_url ? '<a href="' + e.comprobante_url + '" target="_blank" class="btn btn-sm" style="text-decoration:none">Ver comprobante</a>' : '') +
+        (e.comprobante_url ? '<a href="' + safeUrl(e.comprobante_url) + '" target="_blank" rel="noopener noreferrer" class="btn btn-sm" style="text-decoration:none">Ver comprobante</a>' : '') +
         '<button class="btn btn-primary btn-sm" data-envio-id="' + e.id + '" data-monto="' + Number(e.monto_total) + '" data-type="btn-confirmar-envio">Confirmar recepcion</button>' +
         '<span style="font-size:11px;color:var(--blue);cursor:pointer;white-space:nowrap" data-toggle-id="penv-' + e.id + '" data-type="toggle-det">ver detalle</span>' +
         '</div>' +
@@ -1126,7 +1126,7 @@ async function renderPagosClientes() {
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + (p.referencia?' · '+esc(p.referencia):'') + '</div></div>' +
         '<div class="pago-amount" style="' + (p.estado==='cancelado'?'color:var(--text3);text-decoration:line-through':'') + '">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (estadoBadge[p.estado]||'badge-pending') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
-        (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
+        (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
         '</div>'
       ).join('')
     ) + '</div>';
@@ -1750,7 +1750,7 @@ async function renderIntHome() {
         '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
-        (p.comprobante_url ? '<a href="' + esc(p.comprobante_url) + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
+        (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
         '<button class="btn btn-confirm btn-sm" data-id="' + esc(p.id) + '" data-nombre="' + esc(p.profiles?.nombre||'') + '" data-monto="' + Number(p.monto) + '" data-type="btn-conf-cli">Confirmar</button>' +
         '</div>'
       ).join('')
@@ -2177,7 +2177,7 @@ async function renderComisionEmpresa(year, month) {
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(item.forma_pago || '—') + '</div>' +
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (item.confirmado_at ? new Date(item.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
         '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(item.referencia || '—') + '</div>' +
-        (item.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + item.comprobante_url + '" target="_blank" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
+        (item.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + safeUrl(item.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
         '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + coberturaDesc + '</div>' +
         '</div>';
       html += '<div>' +
@@ -2338,7 +2338,7 @@ async function renderCliHome() {
               ? '<span class="badge badge-late">✕ Cancelado</span>'
               : '<span class="badge badge-pending">⏳ En espera</span>'
           ) +
-          (p.comprobante_url ? '<a href="' + p.comprobante_url + '" target="_blank" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
+          (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
           (!confirmado && !cancelado ? '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-pid="' + p.id + '" data-type="btn-cancelar-pago">Cancelar</button>' : '') +
           '</div>';
       }).join('')
@@ -2532,7 +2532,7 @@ async function renderIntComision(year, month) {
           '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(d.forma_pago || '—') + '</div>' +
           '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (d.confirmado_at ? new Date(d.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
           '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(d.referencia || '—') + '</div>' +
-          (d.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + d.comprobante_url + '" target="_blank" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
+          (d.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + safeUrl(d.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
           '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + estadoDesc + '</div>' +
           '</div>';
         return '<div>' +
@@ -2828,6 +2828,9 @@ function generarPassAleatoria() {
 
 // HELPERS
 function esc(str) { return String(str??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Valida que la URL sea http(s) (no javascript:, data:, etc.) y la escapa.
+// Para usar SIEMPRE en href de <a> que viene de datos de usuario o storage.
+function safeUrl(u) { const s=String(u||''); return /^https?:\/\//i.test(s) ? esc(s) : '#'; }
 function fmt(n) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDec(n, d) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d}); }
 function toggleComisionDetail(id) {
