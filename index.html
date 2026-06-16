@@ -2902,13 +2902,28 @@ function renderAyuda() {
           'Desde la pantalla de login hay un link <em>"¿Olvidaste tu contraseña?"</em>. El usuario ingresa su nombre de usuario y, si tiene email registrado, recibe un link para resetear. También podés cambiarla vos desde <strong>Usuarios</strong>.'],
       ]) +
 
-      s('💳 Cobros de clientes', [
+      s('💳 Cobros', [
         ['📥', '¿Dónde veo los pagos que informaron los clientes?',
-          'En <strong>Cobros de clientes</strong> ves todos los pagos informados, con estado, monto, comprobante y fecha. Los pagos empiezan como <em>Pendiente</em> y pasan a <em>Confirmado</em> cuando el intermediario los acepta.'],
+          'En <strong>Cobros</strong> ves todos los pagos informados, con estado, monto, comprobante y fecha. Los pagos empiezan como <em>Pendiente</em> y pasan a <em>Confirmado</em> cuando el intermediario los acepta.'],
         ['✅', '¿Qué significa "Confirmado"?',
           'El intermediario revisó el pago del cliente y confirmó que el dinero está en su poder. A partir de ahí el saldo del intermediario sube y la ventana de 24 hs para comisión empieza a correr.'],
         ['❌', '¿Un cliente puede cancelar un pago?',
           'Sí, siempre que esté en estado <em>Pendiente</em> (antes de que lo confirme el intermediario). Una vez confirmado, el pago no se puede cancelar.'],
+      ]) +
+
+      s('📑 Facturas pendientes y cobranzas', [
+        ['↻', '¿Cómo sincronizo los saldos y facturas con öppen?',
+          'En <strong>Clientes</strong>, arriba a la derecha, clickeá el botón <strong>↻ Actualizar datos</strong>. PayFlow trae las facturas pendientes del grupo <strong>ECR</strong> desde öppen y actualiza los saldos. La operación tarda menos de 1 segundo.'],
+        ['📊', '¿Qué muestra el bloque "Cobranzas — facturas vencidas" del dashboard?',
+          'Al entrar al <strong>Dashboard</strong> ves las facturas vencidas ordenadas por antigüedad (la más vieja primero, hasta 20), con cliente, número, fecha de vencimiento, días de atraso y saldo en rojo. Abajo aparece un sub-bloque con las próximas a vencer en los siguientes 7 días, para anticiparte.'],
+        ['💵', '¿Qué es la métrica "Total vencido"?',
+          'Es la suma de los saldos de todas las facturas vencidas + la cantidad de facturas y la cantidad de clientes que las deben. Es lo primero que ve el cobrador al entrar.'],
+        ['🔍', '¿Cómo veo el detalle de un cliente puntual?',
+          'En <strong>Clientes</strong>, clickeá sobre el saldo de cualquier cliente. Se abre un panel con todas sus facturas pendientes — tipo, número, vencimiento, total, saldo y estado (vencida en rojo, "en X días" o "HOY").'],
+        ['📄', '¿Cómo descargo el PDF de una factura?',
+          'En cualquier tabla donde aparezca el número de factura subrayado en azul (dashboard, modal de detalle por cliente), hacé clic. PayFlow descarga el PDF desde öppen y lo abre en una pestaña nueva en ~1 segundo.'],
+        ['🔴', '¿Qué significa "vencida" exactamente?',
+          'Vencida = la fecha de vencimiento ya pasó (o vence hoy). PayFlow las marca en rojo en todos lados. El cálculo se hace contra el día actual, así que las que ayer estaban "en 1 día" hoy aparecen como "HOY".'],
       ]) +
 
       s('📊 Intermediario', [
@@ -2956,6 +2971,17 @@ function renderAyuda() {
           'Ese monto queda registrado como "en tu poder". Si después no lo enviás a la empresa, queda como deuda pendiente. Confirmá solo los pagos que efectivamente recibiste.'],
       ]) +
 
+      s('📑 Saldos y facturas pendientes (ECR)', [
+        ['👥', '¿De qué clientes veo el saldo y las facturas?',
+          'Solo de los clientes del grupo <strong>ECR</strong>. Esto está aislado por diseño: PayFlow nunca te muestra información de clientes de otros grupos comerciales.'],
+        ['📊', '¿Qué es el bloque "Cobranzas — facturas vencidas (ECR)" del home?',
+          'Es un panel que aparece en tu pantalla principal con las facturas vencidas (hasta 20, ordenadas por antigüedad) y las próximas a vencer (≤ 7 días). Te sirve para tener visibilidad rápida de qué clientes están atrasados con sus pagos.'],
+        ['💵', '¿Para qué me sirve esto?',
+          'Saber qué clientes deben qué te ayuda a entender mejor el contexto de los pagos que van a llegar y los que están demorados. No es algo sobre lo que vos tengas que actuar — la empresa se encarga de las cobranzas — pero tener visibilidad te permite anticipar.'],
+        ['📄', '¿Puedo descargar el PDF de una factura?',
+          'Sí. Hacé clic sobre el número de factura (subrayado en azul) en cualquier tabla. Se descarga desde öppen y se abre en una pestaña nueva en ~1 segundo.'],
+      ]) +
+
       s('📤 Enviar a la empresa', [
         ['💸', '¿Cuándo y cómo registro un envío?',
           'Cuando transferís dinero a la empresa, entrá a <strong>Enviar a empresa</strong>, ingresá el monto total enviado, la forma de pago, la referencia y el comprobante. No necesitás detallar de qué cliente es el dinero — el sistema lo asigna automáticamente.'],
@@ -2989,9 +3015,22 @@ function renderAyuda() {
 
       s('📋 Cómo funciona tu portal', [
         ['🏠', '¿Qué puedo hacer acá?',
-          'Podés informar tus pagos, adjuntar el comprobante y hacer seguimiento del estado. Tu intermediario va a confirmar la recepción y el pago quedará registrado en el sistema.'],
+          'Podés ver tu saldo pendiente, descargar el PDF de cada factura, informar tus pagos con comprobante y hacer seguimiento del estado de cada pago informado.'],
         ['🔐', '¿Mi información es privada?',
-          'Sí. Solo vos, tu intermediario y la empresa pueden ver tus pagos. No hay información compartida entre clientes.'],
+          'Sí. Solo vos, tu intermediario y la empresa pueden ver tus pagos. No hay información compartida entre clientes — cada cliente solo ve lo suyo.'],
+      ]) +
+
+      s('📑 Mis facturas pendientes', [
+        ['💵', '¿Dónde veo cuánto debo?',
+          'En <strong>Mi cuenta</strong>, arriba, aparece la métrica <strong>Saldo pendiente</strong> con el total que adeudás en USD. Si está en cero significa que no tenés facturas pendientes con la empresa.'],
+        ['📋', '¿Dónde veo el detalle factura por factura?',
+          'Más abajo en <strong>Mi cuenta</strong> hay una tabla <em>"Mis facturas pendientes"</em> con cada una: tipo, número, fecha de emisión, vencimiento, total, saldo y estado. Si no tenés facturas, la tabla muestra "No tenés facturas pendientes 🎉".'],
+        ['🔴', '¿Qué significan los estados "Vencida", "HOY", "en 3d"?',
+          '<strong>Vencida</strong> = la fecha de vencimiento ya pasó (aparece en rojo, ej. "5d atrás" = se venció hace 5 días).<br/><strong>HOY</strong> = vence el día actual.<br/><strong>en X d</strong> = vence en X días (en verde).'],
+        ['📄', '¿Cómo descargo el PDF de una factura?',
+          'Hacé clic sobre el número de factura (subrayado en azul) en la tabla. Se descarga desde el sistema de la empresa y se abre en una pestaña nueva en ~1 segundo. Podés guardarlo o imprimirlo desde tu navegador.'],
+        ['↻', '¿Con qué frecuencia se actualiza?',
+          'Los saldos y facturas se actualizan cuando la empresa ejecuta una sincronización con su ERP. Abajo de la tabla aparece la fecha de la última actualización ("Al DD/MM/YYYY · Sincronizado desde Open Orange").'],
       ]) +
 
       s('💸 Informar un pago', [
