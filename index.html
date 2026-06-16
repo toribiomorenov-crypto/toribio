@@ -2946,6 +2946,32 @@ function renderAyuda() {
           'En <strong>Comisión → Registrar pago de comisión</strong> podés anotar el monto pagado y la fecha. Eso queda en el historial y descuenta del saldo pendiente.'],
       ]) +
 
+      s('🔄 Sincronización con öppen', [
+        ['🔄', '¿Qué hace exactamente "Actualizar datos"?',
+          'PayFlow se conecta a la base de öppen, trae los clientes del grupo <strong>ECR</strong> activos y sus facturas pendientes (Status=1, Saldo>0), y los guarda en su propia base. Tarda menos de 1 segundo.'],
+        ['🔒', '¿Modifica algo en öppen?',
+          'No. PayFlow <strong>solo lee</strong> desde öppen, nunca escribe, modifica ni borra nada. Todos los cambios sobre facturas se hacen en öppen y PayFlow los refleja en el próximo sync.'],
+        ['📅', '¿Cuándo conviene sincronizar?',
+          'A primera hora del día y después de procesar cobros importantes en el ERP. Si querés visibilidad inmediata de un cambio hecho en öppen, ejecutá Actualizar datos.'],
+        ['🔧', '¿Dónde están las credenciales de öppen?',
+          'En la tabla <code>settings</code> de Supabase (claves <code>oppen_db_host</code>, <code>oppen_db_user</code>, <code>oppen_db_pass</code>, etc.). Nunca en el código del frontend ni en variables de entorno de Railway. Si rotan la contraseña, actualizá el valor en Supabase y la próxima sincronización ya usa la nueva — sin redeploy.'],
+      ]) +
+
+      s('❓ Preguntas frecuentes', [
+        ['👤', 'Un cliente nuevo no aparece después de sincronizar',
+          'Verificá en öppen que el cliente esté con <strong>GroupCode=ECR</strong> y <strong>Closed=0</strong>. PayFlow solo trae los del grupo ECR activos.'],
+        ['💰', 'Una factura figura pendiente pero ya está paga',
+          'Confirmá que la cobranza esté registrada en öppen con <code>Saldo=0</code>. Después clickeá <strong>Actualizar datos</strong> y debería desaparecer de PayFlow.'],
+        ['❓', 'El saldo no coincide con öppen',
+          'PayFlow muestra lo último que trajo en el sync. Corré <strong>Actualizar datos</strong> y volvé a comparar. Si sigue diferente, revisá los logs de Railway.'],
+        ['📄', 'Un PDF de factura no descarga',
+          'Esperá 5 segundos y refrescá la página. Si persiste, puede ser un timeout transitorio con öppen — reintentá en unos minutos.'],
+        ['🔑', 'Un usuario olvidó su contraseña',
+          'Desde <strong>Usuarios</strong> podés resetearla. El usuario también puede usar "¿Olvidaste tu contraseña?" del login si tiene email de notificaciones configurado.'],
+        ['❌', 'Error al sincronizar',
+          'Suele ser problema de credenciales en Supabase settings o de conectividad con la DB de öppen. Mirá los logs de Railway para el mensaje exacto.'],
+      ]) +
+
       tip('El Excel de comisión te muestra el desglose completo por pago, con monto cubierto, estado y comisión individual. Ideal para compartir con el intermediario.');
 
   } else if (rol === 'pagador') {
@@ -2979,7 +3005,7 @@ function renderAyuda() {
         ['💵', '¿Para qué me sirve esto?',
           'Saber qué clientes deben qué te ayuda a entender mejor el contexto de los pagos que van a llegar y los que están demorados. No es algo sobre lo que vos tengas que actuar — la empresa se encarga de las cobranzas — pero tener visibilidad te permite anticipar.'],
         ['📄', '¿Puedo descargar el PDF de una factura?',
-          'Sí. Hacé clic sobre el número de factura (subrayado en azul) en cualquier tabla. Se descarga desde öppen y se abre en una pestaña nueva en ~1 segundo.'],
+          'Sí. Hacé clic sobre el número de factura (subrayado en azul) en cualquier tabla. Se descarga del sistema de la empresa y se abre en una pestaña nueva en ~1 segundo.'],
       ]) +
 
       s('📤 Enviar a la empresa', [
@@ -3002,6 +3028,36 @@ function renderAyuda() {
           'Registraste un envío que cubre ese pago, pero la empresa todavía no lo confirmó. Una vez que lo confirmen, el estado cambia a <em>Califica</em> o <em>Parcial</em>.'],
         ['🔴', '¿Qué significa "No califica"?',
           'Pasaron las 24 hs desde que el cliente informó el pago y no hubo ningún envío confirmado que lo cubriera. Ese pago ya no genera comisión.'],
+      ]) +
+
+      s('🔄 Cómo se actualizan los datos', [
+        ['🏢', '¿Quién mantiene los saldos y las facturas?',
+          'La empresa los mantiene en su sistema de gestión. Cada vez que registra un cobro o emite una factura, ese cambio queda en su sistema.'],
+        ['↻', '¿Cuándo veo los datos actualizados?',
+          'Cuando la empresa ejecuta una sincronización desde PayFlow, los saldos y facturas que ves en tu pantalla se actualizan al estado más reciente. Al pie de la tabla podés ver la fecha de la última actualización.'],
+        ['🔒', '¿Yo puedo disparar una sincronización?',
+          'No. Esa acción la ejecuta solo el perfil empresa. Vos siempre ves la última versión disponible.'],
+      ]) +
+
+      s('❓ Preguntas frecuentes', [
+        ['👤', 'No veo a un cliente que esperaba ver',
+          'Puede ser que no esté habilitado en el grupo que vos ves. Consultalo con la empresa.'],
+        ['💰', 'El saldo de un cliente está desactualizado',
+          'Los saldos se actualizan cuando la empresa sincroniza. Si necesitás el dato fresco, pedile a la empresa que ejecute la sincronización.'],
+        ['📧', 'No me llegan los emails de notificación',
+          'Revisá tu carpeta de spam. Si no están ahí, verificá con la empresa que el email de notificaciones esté bien configurado en tu usuario.'],
+        ['📄', 'El PDF de una factura no se descarga',
+          'Esperá 5 segundos y refrescá la página. Si persiste después de varios intentos, contactá soporte (abajo).'],
+        ['🔑', 'Olvidé mi contraseña',
+          'En la pantalla de login hacé clic en <strong>"¿Olvidaste tu contraseña?"</strong>. Si tu email de notificaciones está configurado, recibís un link para resetear. Si no, pedile a la empresa que te la resetee.'],
+      ]) +
+
+      s('📞 Soporte', [
+        ['👋', 'Contacto — Soledad',
+          'Si tenés un problema o duda que esta guía no resuelva, contactá a <strong>Soledad</strong>:<br/><br/>' +
+          '📞 <a href="tel:+17868639251" style="color:var(--blue);text-decoration:underline;font-weight:600">+1 (786) 863-9251</a><br/>' +
+          '💬 <a href="https://wa.me/17868639251" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">WhatsApp</a><br/><br/>' +
+          'Cuando contactes, indicá tu usuario y describí qué te pasa con la mayor precisión posible. Si podés mandar una captura, mejor.'],
       ]) +
 
       tip('Para maximizar tu comisión: confirmá los pagos de clientes ni bien los recibís, y enviá el dinero a la empresa lo antes posible. Cuanto antes enviás, más pagos podés cubrir dentro de la ventana.');
@@ -3051,6 +3107,29 @@ function renderAyuda() {
           'Sí, pero solo mientras esté en estado <em>En espera</em>. Una vez que el intermediario lo confirme, ya no se puede cancelar. Para cancelar, buscá el pago en <strong>Mi cuenta</strong> y hacé clic en <strong>Cancelar</strong>.'],
         ['🔁', '¿Puedo informar otro pago si tengo uno pendiente?',
           'Sí, podés informar varios pagos. Cada uno se procesa de forma independiente.'],
+      ]) +
+
+      s('❓ Preguntas frecuentes', [
+        ['🔑', 'Olvidé mi contraseña',
+          'En la pantalla de login hacé clic en <strong>"¿Olvidaste tu contraseña?"</strong>. Ingresá tu nombre de usuario y, si tenés email registrado, recibís un link para resetearla. Si no llega o no tenés email registrado, contactá soporte.'],
+        ['💰', 'Veo una factura como vencida pero ya la pagué',
+          'Los pagos pueden tardar en reflejarse mientras la empresa los registra. Esperá 24 a 48 horas. Si después de ese tiempo sigue figurando como vencida, contactá soporte.'],
+        ['📄', 'El PDF de una factura no se descarga',
+          'Esperá 5 segundos y refrescá la página. Si después de varios intentos sigue fallando, contactá soporte.'],
+        ['⏳', 'Mi pago figura "En espera" hace varias horas',
+          'Tu intermediario todavía no confirmó la recepción del dinero. Es normal que tarde algunas horas. Si pasaron más de 24 horas, contactá soporte para que se revise.'],
+        ['📊', 'Mi saldo no se actualizó después de pagar',
+          'El saldo se actualiza cuando la empresa registra tu pago en su sistema, lo que puede demorar dependiendo del momento del día. Si después de 48 horas sigue sin actualizarse, contactá soporte.'],
+        ['📧', 'No me llegan los emails de notificación',
+          'Revisá tu carpeta de spam. Si no están ahí, contactá soporte para verificar que tu email esté bien registrado.'],
+      ]) +
+
+      s('📞 Soporte', [
+        ['👋', 'Contacto — Soledad',
+          'Si tenés un problema o duda que esta guía no resuelva, escribile o llamá a <strong>Soledad</strong>:<br/><br/>' +
+          '📞 <a href="tel:+17868639251" style="color:var(--blue);text-decoration:underline;font-weight:600">+1 (786) 863-9251</a><br/>' +
+          '💬 <a href="https://wa.me/17868639251" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600">WhatsApp</a><br/><br/>' +
+          'Cuando contactes, indicá tu nombre y describí qué te pasa con la mayor precisión posible. Si podés mandar una captura de pantalla, mejor.'],
       ]) +
 
       tip('Si informaste un pago por error o con un monto equivocado, cancelalo rápido (antes de que el intermediario lo confirme) e informá uno nuevo con el monto correcto.');
