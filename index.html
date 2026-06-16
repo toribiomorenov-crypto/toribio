@@ -404,6 +404,68 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 </div>
 
 
+<!-- ===== MODAL: Cargar pago en nombre de un cliente (empresa) ===== -->
+<div class="modal-overlay" id="modal-cargar-pago-empresa">
+  <div class="modal" style="max-width:500px">
+    <div class="modal-title">Cargar pago en nombre de un cliente</div>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:14px;line-height:1.5">
+      Registrá un pago que el cliente no cargó en su portal. Queda visible como <em>"Cargado por empresa"</em> y el intermediario tiene 24 hs desde ahora para confirmarlo y enviarlo.
+    </p>
+
+    <div class="form-group" id="cpe-cliente-selector-wrap">
+      <label class="form-label">Cliente <span style="color:var(--red)">*</span></label>
+      <select class="form-select" id="cpe-cliente"></select>
+    </div>
+
+    <div class="form-group" id="cpe-cliente-fijo-wrap" style="display:none">
+      <label class="form-label">Cliente</label>
+      <div id="cpe-cliente-fijo-label" style="padding:10px 12px;background:var(--surface2);border-radius:6px;font-weight:500"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Monto pagado (USD) <span style="color:var(--red)">*</span></label>
+      <input class="form-input" type="number" id="cpe-monto" placeholder="0.00" step="0.01"/>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Forma de pago <span style="color:var(--red)">*</span></label>
+      <select class="form-select" id="cpe-forma">
+        <option value="transferencia">Transferencia</option>
+        <option value="efectivo">Efectivo</option>
+        <option value="usdt">USDT</option>
+        <option value="cheque">Cheque</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Referencia / notas (opcional)</label>
+      <input class="form-input" id="cpe-ref" placeholder="ej: llamó por teléfono, transferencia de ayer"/>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Comprobante (opcional)</label>
+      <div class="upload-zone" onclick="document.getElementById('cpe-file').click()">
+        <div class="upload-icon">^</div>Subir comprobante
+        <div class="upload-hint">foto, PDF, captura - max 5MB</div>
+        <input type="file" id="cpe-file" style="display:none" accept="image/*,.pdf"/>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <span id="cpe-file-name" style="font-size:12px;color:var(--text3);flex:1"></span>
+        <button type="button" id="cpe-file-clear" style="display:none;font-size:11px;color:var(--red);background:none;border:none;cursor:pointer;padding:0" onclick="document.getElementById('cpe-file').value='';document.getElementById('cpe-file-name').textContent='';this.style.display='none'">✕ Quitar</button>
+      </div>
+    </div>
+
+    <div class="login-error" id="cpe-error"></div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="cerrarModal('modal-cargar-pago-empresa')">Cancelar</button>
+      <button class="btn btn-primary" id="btn-cpe-submit" onclick="enviarCargarPagoEmpresa()">Cargar pago</button>
+    </div>
+  </div>
+</div>
+
+
 <!-- MODAL: Genérico (sync saldos, detalle saldo, etc.) -->
 <div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal" id="modal-body" style="max-width:480px"></div>
@@ -756,7 +818,7 @@ async function loadView(id) {
 // ── EMPRESA: DASHBOARD ──
 async function renderDashboard() {
   const [pagCliRes, enviosRes, facturasRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*)').order('created_at', { ascending: false }),
     db.from('facturas_pendientes').select('*').order('dias_vencidos', { ascending: true }),
   ]);
@@ -891,7 +953,9 @@ async function renderDashboard() {
     (pagos.slice(0,5).length === 0 ? '<div class="empty-state">Sin pagos aun.</div>' :
       pagos.slice(0,5).map(p =>
         '<div class="pago-row" style="padding:10px 18px">' +
-        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'Cliente') + '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'Cliente') +
+          (p.cargado_por_profile_id ? ' <span class="badge" style="background:#FEF3C7;color:#92400E;border:1px solid #FBBF24;font-size:10px;padding:2px 6px;margin-left:4px" title="Cargado por la empresa en nombre del cliente">🏢 Cargado por empresa</span>' : '') +
+          '</div><div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         '<span class="badge ' + (p.estado==='confirmado'?'badge-released':p.estado==='cancelado'?'badge-late':'badge-pending') + '">' + (p.estado==='confirmado'?'Confirmado':p.estado==='cancelado'?'Cancelado':'Pendiente') + '</span>' +
         '</div>'
@@ -914,7 +978,7 @@ async function renderDashboard() {
 // ── EMPRESA: CONTROL INTERMEDIARIO ──
 async function renderControlIntermediario() {
   const [pagCliRes, enviosRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: false }),
   ]);
 
@@ -1029,7 +1093,7 @@ function toggleDetalle(id) {
 
 async function exportarExcel() {
   const [pagRes, envRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: true }),
+    db.from('pagos_cliente').select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').order('created_at', { ascending: true }),
   ]);
   const pagos = pagRes.data || [];
@@ -1113,23 +1177,38 @@ function calcularDemoraEnvioTexto(envio, pagos) {
 
 // ── EMPRESA: PAGOS CLIENTES ──
 async function renderPagosClientes() {
-  const { data: pagos } = await db.from('pagos_cliente').select('*, profiles(nombre)').order('created_at', { ascending: false });
+  // Traigo también el nombre del que cargó (si fue empresa) para el badge
+  const { data: pagos } = await db
+    .from('pagos_cliente')
+    .select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre), cargador:profiles!pagos_cliente_cargado_por_profile_id_fkey(nombre)')
+    .order('created_at', { ascending: false });
   const c = document.getElementById('main-content');
   const estadoLabel = { pendiente: 'Pendiente', confirmado: 'Confirmado', cancelado: 'Cancelado' };
   const estadoBadge = { confirmado: 'badge-confirmed', pendiente: 'badge-pending', cancelado: 'badge-late' };
-  c.innerHTML = '<div class="card"><div class="card-header"><div class="card-title">Todos los cobros informados por clientes</div></div>' +
+
+  let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">' +
+    '<div style="font-size:13px;color:var(--text3)">' + (pagos||[]).length + ' pago' + ((pagos||[]).length !== 1 ? 's' : '') + ' registrado' + ((pagos||[]).length !== 1 ? 's' : '') + '</div>' +
+    '<button class="btn btn-primary btn-sm" onclick="abrirCargarPagoEmpresa()">+ Cargar pago para cliente</button>' +
+    '</div>';
+
+  html += '<div class="card"><div class="card-header"><div class="card-title">Todos los cobros informados por clientes</div></div>' +
     (!(pagos||[]).length ? '<div class="empty-state">Sin pagos registrados aún.</div>' :
-      pagos.map(p =>
-        '<div class="pago-row">' +
-        '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
-        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
-        '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + (p.referencia?' · '+esc(p.referencia):'') + '</div></div>' +
-        '<div class="pago-amount" style="' + (p.estado==='cancelado'?'color:var(--text3);text-decoration:line-through':'') + '">USD ' + fmt(p.monto) + '</div>' +
-        '<span class="badge ' + (estadoBadge[p.estado]||'badge-pending') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
-        (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
-        '</div>'
-      ).join('')
+      pagos.map(p => {
+        const cargadoPorEmpresa = p.cargado_por_profile_id != null;
+        const cargadorNombre = p.cargador?.nombre || 'empresa';
+        return '<div class="pago-row">' +
+          '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
+          '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') +
+            (cargadoPorEmpresa ? ' <span class="badge" style="background:#FEF3C7;color:#92400E;border:1px solid #FBBF24;font-size:10px;padding:2px 6px;margin-left:4px" title="Cargado por ' + esc(cargadorNombre) + '">🏢 Cargado por empresa</span>' : '') +
+            '</div>' +
+          '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + (p.referencia?' · '+esc(p.referencia):'') + '</div></div>' +
+          '<div class="pago-amount" style="' + (p.estado==='cancelado'?'color:var(--text3);text-decoration:line-through':'') + '">USD ' + fmt(p.monto) + '</div>' +
+          '<span class="badge ' + (estadoBadge[p.estado]||'badge-pending') + '">' + (estadoLabel[p.estado]||p.estado) + '</span>' +
+          (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline;white-space:nowrap">Comprobante</a>' : '') +
+          '</div>';
+      }).join('')
     ) + '</div>';
+  c.innerHTML = html;
 }
 
 // ── EMPRESA: CLIENTES ──
@@ -1204,6 +1283,7 @@ async function renderClientes() {
       }
       if (tieneAcceso) {
         html += '<span class="badge badge-released">Con acceso</span>';
+        html += '<button class="btn btn-sm" data-id="' + esc(perfilId) + '" data-nombre="' + esc(cl.nombre) + '" data-type="cargar-pago" title="Cargar pago en nombre del cliente">💸 Cargar pago</button>';
         html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + esc(perfilId) + '" data-nombre="' + esc(cl.nombre) + '" data-type="revocar-acceso">Revocar</button>';
       } else {
         html += '<span class="badge badge-pending">Sin acceso</span>';
@@ -1231,6 +1311,9 @@ async function renderClientes() {
   });
   document.querySelectorAll('[data-type="revocar-acceso"]').forEach(function(btn) {
     btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
+  });
+  document.querySelectorAll('[data-type="cargar-pago"]').forEach(function(btn) {
+    btn.onclick = function() { abrirCargarPagoEmpresa(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
   });
 
   // Filtro combinado: texto + grupo
@@ -1639,7 +1722,7 @@ async function renderIntHome() {
   // intermediario solo debe ver ECR — si alguna vez se cambia el sync,
   // hay que asegurarse de mantener este aislamiento.
   const [pendRes, confRes, envRes, facturasRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').eq('estado','pendiente').order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','pendiente').order('created_at', { ascending: false }),
     db.from('pagos_cliente').select('monto').eq('estado','confirmado'),
     db.from('envios_intermediario').select('monto_total, confirmado').order('created_at', { ascending: false }),
     db.from('facturas_pendientes').select('*').order('dias_vencidos', { ascending: true }),
@@ -1747,7 +1830,9 @@ async function renderIntHome() {
       lista.map(p =>
         '<div class="pago-row">' +
         '<div class="pago-avatar">' + esc(p.profiles?.nombre||'?').substring(0,2).toUpperCase() + '</div>' +
-        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') + '</div>' +
+        '<div class="pago-info"><div class="pago-name">' + esc(p.profiles?.nombre||'-') +
+          (p.cargado_por_profile_id ? ' <span class="badge" style="background:#FEF3C7;color:#92400E;border:1px solid #FBBF24;font-size:10px;padding:2px 6px;margin-left:4px" title="Cargado por la empresa en nombre del cliente">🏢 Cargado por empresa</span>' : '') +
+          '</div>' +
         '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + ' · ' + esc(p.forma_pago) + '</div></div>' +
         '<div class="pago-amount">USD ' + fmt(p.monto) + '</div>' +
         (p.comprobante_url ? '<a href="' + safeUrl(p.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--blue);text-decoration:underline">Comprobante</a>' : '') +
@@ -2014,7 +2099,7 @@ async function renderIntHistorial(desde, hasta) {
   const hastaVal = hasta || ultimoDia;
 
   const [pagRes, envRes, allPagRes, allEnvRes] = await Promise.all([
-    db.from('pagos_cliente').select('*, profiles(nombre)').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
+    db.from('pagos_cliente').select('*, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
     db.from('envios_intermediario').select('*, detalle_envio(*, profiles(nombre))').gte('created_at', desdeVal).lte('created_at', hastaVal).order('created_at', { ascending: false }),
     db.from('pagos_cliente').select('monto').eq('estado', 'confirmado'),
     db.from('envios_intermediario').select('monto_total'),
@@ -2101,7 +2186,7 @@ async function renderComisionEmpresa(year, month) {
   const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
 
   const [pagRes, envRes, pagosComRes] = await Promise.all([
-    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
@@ -2328,7 +2413,9 @@ async function renderCliHome() {
         const cancelado = p.estado === 'cancelado';
         return '<div class="pago-row">' +
           '<div class="pago-info">' +
-          '<div class="pago-name">' + esc((p.forma_pago||'').charAt(0).toUpperCase()+(p.forma_pago||'').slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') + '</div>' +
+          '<div class="pago-name">' + esc((p.forma_pago||'').charAt(0).toUpperCase()+(p.forma_pago||'').slice(1)) + (p.referencia ? ' · ' + esc(p.referencia) : '') +
+            (p.cargado_por_profile_id ? ' <span class="badge" style="background:#FEF3C7;color:#92400E;border:1px solid #FBBF24;font-size:10px;padding:2px 6px;margin-left:4px" title="La empresa cargó este pago en tu nombre">🏢 Cargado por la empresa</span>' : '') +
+            '</div>' +
           '<div class="pago-sub">' + new Date(p.created_at).toLocaleString('es-AR') + '</div>' +
           '</div>' +
           '<div class="pago-amount" style="' + (cancelado ? 'color:var(--text3);text-decoration:line-through' : '') + '">USD ' + fmt(p.monto) + '</div>' +
@@ -2428,7 +2515,7 @@ async function renderIntComision(year, month) {
   const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
 
   const [pagRes, envConfRes, envPendRes] = await Promise.all([
-    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
   ]);
@@ -2616,6 +2703,119 @@ async function renderCliPagar() {
     }
   });
 }
+
+// ── EMPRESA: cargar pago en nombre de un cliente ──────────────────────────
+// Modal reutilizable: se puede abrir desde Clientes (con cliente preseleccionado)
+// o desde Cobros (con selector vacío para elegir).
+async function abrirCargarPagoEmpresa(clienteProfileId, clienteNombre) {
+  // Reset del formulario
+  document.getElementById('cpe-monto').value = '';
+  document.getElementById('cpe-forma').value = 'transferencia';
+  document.getElementById('cpe-ref').value = '';
+  document.getElementById('cpe-file').value = '';
+  document.getElementById('cpe-file-name').textContent = '';
+  document.getElementById('cpe-file-clear').style.display = 'none';
+  document.getElementById('cpe-error').style.display = 'none';
+
+  const selectorWrap = document.getElementById('cpe-cliente-selector-wrap');
+  const fijoWrap     = document.getElementById('cpe-cliente-fijo-wrap');
+
+  if (clienteProfileId) {
+    // Cliente preseleccionado (vino desde la fila de Clientes)
+    selectorWrap.style.display = 'none';
+    fijoWrap.style.display = '';
+    document.getElementById('cpe-cliente-fijo-label').textContent = clienteNombre || '';
+    document.getElementById('cpe-cliente').setAttribute('data-fixed', clienteProfileId);
+  } else {
+    // Selector libre (vino desde Cobros): cargar lista de clientes activos
+    selectorWrap.style.display = '';
+    fijoWrap.style.display = 'none';
+    document.getElementById('cpe-cliente').removeAttribute('data-fixed');
+    const { data: clientes } = await db
+      .from('profiles')
+      .select('id, nombre')
+      .eq('rol', 'cliente')
+      .neq('activo', false)
+      .order('nombre', { ascending: true });
+    const sel = document.getElementById('cpe-cliente');
+    sel.innerHTML = '<option value="">— Elegí un cliente —</option>' +
+      (clientes || []).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nombre) + '</option>').join('');
+  }
+
+  abrirModal('modal-cargar-pago-empresa');
+}
+
+async function enviarCargarPagoEmpresa() {
+  const errEl = document.getElementById('cpe-error');
+  errEl.style.display = 'none';
+
+  // Resolver cliente_profile_id (fijo o seleccionado)
+  const fixedId = document.getElementById('cpe-cliente').getAttribute('data-fixed');
+  const selectedId = document.getElementById('cpe-cliente').value;
+  const cliente_profile_id = fixedId || selectedId;
+  if (!cliente_profile_id) { showErr(errEl, 'Seleccioná un cliente.'); return; }
+
+  const monto = parseFloat(document.getElementById('cpe-monto').value);
+  if (!monto || monto <= 0) { showErr(errEl, 'Ingresá un monto válido mayor a cero.'); return; }
+
+  const forma_pago = document.getElementById('cpe-forma').value;
+  const referencia = document.getElementById('cpe-ref').value.trim() || null;
+  const file = document.getElementById('cpe-file').files[0];
+  if (file && file.size > 5 * 1024 * 1024) { showErr(errEl, 'El comprobante supera 5 MB.'); return; }
+
+  const btn = document.getElementById('btn-cpe-submit');
+  btn.disabled = true; btn.textContent = 'Cargando...';
+
+  try {
+    // Subir comprobante si hay (mismo bucket que usan los clientes)
+    let comprobante_url = null;
+    if (file) {
+      const ext = file.name.split('.').pop();
+      const path = cliente_profile_id + '/' + Date.now() + '.' + ext;
+      const { error: upErr } = await db.storage.from('comprobantes').upload(path, file);
+      if (upErr) throw new Error('Error al subir comprobante: ' + upErr.message);
+      comprobante_url = db.storage.from('comprobantes').getPublicUrl(path).data.publicUrl;
+    }
+
+    // Llamar al endpoint del backend
+    const { data: s } = await db.auth.getSession();
+    const token = s?.session?.access_token;
+    const resp = await fetch(BACKEND_URL + '/api/empresa-cargar-pago-cliente', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body:    JSON.stringify({ cliente_profile_id, monto, forma_pago, referencia, comprobante_url }),
+    });
+    const result = await resp.json();
+    if (!resp.ok || result.error) throw new Error(result.error || 'Error inesperado');
+
+    cerrarModal('modal-cargar-pago-empresa');
+    alert('✓ Pago cargado correctamente. El intermediario va a recibir la notificación.');
+
+    // Refrescar la vista actual si corresponde
+    const main = document.getElementById('main-content');
+    if (main && document.getElementById('nav-pagos-clientes')?.classList.contains('active')) {
+      renderPagosClientes();
+    } else if (document.getElementById('nav-clientes')?.classList.contains('active')) {
+      renderClientes();
+    }
+  } catch (e) {
+    showErr(errEl, e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Cargar pago';
+  }
+}
+
+// Listener para mostrar el nombre del archivo elegido
+document.addEventListener('DOMContentLoaded', () => {
+  const f = document.getElementById('cpe-file');
+  if (f) f.addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (file) {
+      document.getElementById('cpe-file-name').textContent = 'Archivo: ' + file.name;
+      document.getElementById('cpe-file-clear').style.display = 'inline';
+    }
+  });
+});
 
 async function informarPago() {
   const monto = parseFloat(document.getElementById('cp-monto').value);
