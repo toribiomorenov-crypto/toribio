@@ -412,14 +412,17 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
       Registrá un pago que el cliente no cargó en su portal. Queda visible como <em>"Cargado por empresa"</em> y el intermediario tiene 24 hs desde ahora para confirmarlo y enviarlo.
     </p>
 
-    <div class="form-group" id="cpe-cliente-selector-wrap">
+    <div class="form-group" id="cpe-cliente-selector-wrap" style="position:relative">
       <label class="form-label">Cliente <span style="color:var(--red)">*</span></label>
-      <select class="form-select" id="cpe-cliente"></select>
+      <input class="form-input" id="cpe-cliente-buscar" placeholder="Escribí para buscar..." autocomplete="off" data-codigo="" data-nombre=""/>
+      <div id="cpe-cliente-results" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:6px;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,0.08);margin-top:2px"></div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Lista del grupo ECR · Si el cliente no tiene perfil, se crea uno automáticamente.</div>
     </div>
 
     <div class="form-group" id="cpe-cliente-fijo-wrap" style="display:none">
       <label class="form-label">Cliente</label>
       <div id="cpe-cliente-fijo-label" style="padding:10px 12px;background:var(--surface2);border-radius:6px;font-weight:500"></div>
+      <input type="hidden" id="cpe-cliente-fijo-codigo"/>
     </div>
 
     <div class="form-group">
@@ -1281,9 +1284,12 @@ async function renderClientes() {
         if (saldoFecha) html += '<div style="font-size:10px;color:var(--text3)">' + saldoFecha + '</div>';
         html += '</div>';
       }
+      // Botón "Cargar pago" — siempre disponible (no requiere que el cliente
+      // tenga cuenta; el backend crea un perfil sombra si hace falta)
+      html += '<button class="btn btn-sm" data-codigo="' + esc(cl.codigo||'') + '" data-nombre="' + esc(cl.nombre) + '" data-type="cargar-pago" title="Cargar pago en nombre del cliente">💸 Cargar pago</button>';
+
       if (tieneAcceso) {
         html += '<span class="badge badge-released">Con acceso</span>';
-        html += '<button class="btn btn-sm" data-id="' + esc(perfilId) + '" data-nombre="' + esc(cl.nombre) + '" data-type="cargar-pago" title="Cargar pago en nombre del cliente">💸 Cargar pago</button>';
         html += '<button class="btn btn-sm" style="color:var(--red);border-color:var(--red-border)" data-id="' + esc(perfilId) + '" data-nombre="' + esc(cl.nombre) + '" data-type="revocar-acceso">Revocar</button>';
       } else {
         html += '<span class="badge badge-pending">Sin acceso</span>';
@@ -1313,7 +1319,7 @@ async function renderClientes() {
     btn.onclick = function() { revocarAcceso(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
   });
   document.querySelectorAll('[data-type="cargar-pago"]').forEach(function(btn) {
-    btn.onclick = function() { abrirCargarPagoEmpresa(this.getAttribute('data-id'), this.getAttribute('data-nombre')); };
+    btn.onclick = function() { abrirCargarPagoEmpresa(this.getAttribute('data-codigo'), this.getAttribute('data-nombre')); };
   });
 
   // Filtro combinado: texto + grupo
@@ -2705,9 +2711,12 @@ async function renderCliPagar() {
 }
 
 // ── EMPRESA: cargar pago en nombre de un cliente ──────────────────────────
-// Modal reutilizable: se puede abrir desde Clientes (con cliente preseleccionado)
-// o desde Cobros (con selector vacío para elegir).
-async function abrirCargarPagoEmpresa(clienteProfileId, clienteNombre) {
+// Modal reutilizable con selector buscable (filtra escribiendo).
+// Lista: clientes del listado öppen del grupo ECR (con o sin cuenta PayFlow).
+// El backend resuelve el perfil o crea uno "sombra" si no existe.
+window.__cpeClientesECR = null; // cache de la lista
+
+async function abrirCargarPagoEmpresa(clienteCodigo, clienteNombre) {
   // Reset del formulario
   document.getElementById('cpe-monto').value = '';
   document.getElementById('cpe-forma').value = 'transferencia';
@@ -2719,41 +2728,80 @@ async function abrirCargarPagoEmpresa(clienteProfileId, clienteNombre) {
 
   const selectorWrap = document.getElementById('cpe-cliente-selector-wrap');
   const fijoWrap     = document.getElementById('cpe-cliente-fijo-wrap');
+  const buscarInput  = document.getElementById('cpe-cliente-buscar');
+  const resultsDiv   = document.getElementById('cpe-cliente-results');
 
-  if (clienteProfileId) {
+  if (clienteCodigo) {
     // Cliente preseleccionado (vino desde la fila de Clientes)
     selectorWrap.style.display = 'none';
     fijoWrap.style.display = '';
     document.getElementById('cpe-cliente-fijo-label').textContent = clienteNombre || '';
-    document.getElementById('cpe-cliente').setAttribute('data-fixed', clienteProfileId);
+    document.getElementById('cpe-cliente-fijo-codigo').value = clienteCodigo;
   } else {
-    // Selector libre (vino desde Cobros): cargar lista de clientes activos
+    // Selector libre (vino desde Cobros): cargar lista de clientes ECR
     selectorWrap.style.display = '';
     fijoWrap.style.display = 'none';
-    document.getElementById('cpe-cliente').removeAttribute('data-fixed');
-    const { data: clientes } = await db
-      .from('profiles')
-      .select('id, nombre')
-      .eq('rol', 'cliente')
-      .neq('activo', false)
-      .order('nombre', { ascending: true });
-    const sel = document.getElementById('cpe-cliente');
-    sel.innerHTML = '<option value="">— Elegí un cliente —</option>' +
-      (clientes || []).map(c => '<option value="' + esc(c.id) + '">' + esc(c.nombre) + '</option>').join('');
+    buscarInput.value = '';
+    buscarInput.setAttribute('data-codigo', '');
+    buscarInput.setAttribute('data-nombre', '');
+    resultsDiv.style.display = 'none';
+
+    if (!window.__cpeClientesECR) {
+      const { data } = await db
+        .from('clientes_importados')
+        .select('codigo, nombre')
+        .eq('grupo', 'ECR')
+        .order('nombre', { ascending: true });
+      window.__cpeClientesECR = data || [];
+    }
   }
 
   abrirModal('modal-cargar-pago-empresa');
+  setTimeout(() => { if (clienteCodigo == null) buscarInput.focus(); }, 50);
+}
+
+// Filtrado en vivo de la lista mientras se escribe
+function _cpeRenderResults(filtro) {
+  const lista = window.__cpeClientesECR || [];
+  const resultsDiv = document.getElementById('cpe-cliente-results');
+  const q = (filtro || '').toLowerCase().trim();
+  const filtrados = q
+    ? lista.filter(c => c.nombre.toLowerCase().includes(q) || (c.codigo || '').includes(q))
+    : lista;
+
+  if (filtrados.length === 0) {
+    resultsDiv.innerHTML = '<div style="padding:10px 14px;color:var(--text3);font-size:13px">Sin resultados</div>';
+  } else {
+    resultsDiv.innerHTML = filtrados.slice(0, 30).map(c =>
+      '<div class="cpe-result-item" data-codigo="' + esc(c.codigo) + '" data-nombre="' + esc(c.nombre) + '" style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" onmouseenter="this.style.background=\'var(--surface2)\'" onmouseleave="this.style.background=\'\'">' +
+        '<div style="font-weight:500">' + esc(c.nombre) + '</div>' +
+        '<div style="font-size:11px;color:var(--text3);font-family:\'DM Mono\',monospace">Cod: ' + esc(c.codigo || '-') + '</div>' +
+      '</div>'
+    ).join('');
+    resultsDiv.querySelectorAll('.cpe-result-item').forEach(el => {
+      el.onclick = function() {
+        const codigo = this.getAttribute('data-codigo');
+        const nombre = this.getAttribute('data-nombre');
+        const input = document.getElementById('cpe-cliente-buscar');
+        input.value = nombre;
+        input.setAttribute('data-codigo', codigo);
+        input.setAttribute('data-nombre', nombre);
+        document.getElementById('cpe-cliente-results').style.display = 'none';
+      };
+    });
+  }
+  resultsDiv.style.display = '';
 }
 
 async function enviarCargarPagoEmpresa() {
   const errEl = document.getElementById('cpe-error');
   errEl.style.display = 'none';
 
-  // Resolver cliente_profile_id (fijo o seleccionado)
-  const fixedId = document.getElementById('cpe-cliente').getAttribute('data-fixed');
-  const selectedId = document.getElementById('cpe-cliente').value;
-  const cliente_profile_id = fixedId || selectedId;
-  if (!cliente_profile_id) { showErr(errEl, 'Seleccioná un cliente.'); return; }
+  // Resolver el cliente seleccionado: codigo fijo (modo Clientes) o buscador (modo Cobros)
+  const fijoCodigo  = document.getElementById('cpe-cliente-fijo-codigo').value;
+  const buscaCodigo = document.getElementById('cpe-cliente-buscar').getAttribute('data-codigo');
+  const cliente_codigo = fijoCodigo || buscaCodigo;
+  if (!cliente_codigo) { showErr(errEl, 'Seleccioná un cliente.'); return; }
 
   const monto = parseFloat(document.getElementById('cpe-monto').value);
   if (!monto || monto <= 0) { showErr(errEl, 'Ingresá un monto válido mayor a cero.'); return; }
@@ -2767,33 +2815,33 @@ async function enviarCargarPagoEmpresa() {
   btn.disabled = true; btn.textContent = 'Cargando...';
 
   try {
-    // Subir comprobante si hay (mismo bucket que usan los clientes)
+    // Subir comprobante si hay (usa codigo como prefix del path)
     let comprobante_url = null;
     if (file) {
       const ext = file.name.split('.').pop();
-      const path = cliente_profile_id + '/' + Date.now() + '.' + ext;
+      const path = 'codigo-' + cliente_codigo + '/' + Date.now() + '.' + ext;
       const { error: upErr } = await db.storage.from('comprobantes').upload(path, file);
       if (upErr) throw new Error('Error al subir comprobante: ' + upErr.message);
       comprobante_url = db.storage.from('comprobantes').getPublicUrl(path).data.publicUrl;
     }
 
-    // Llamar al endpoint del backend
+    // Llamar al endpoint
     const { data: s } = await db.auth.getSession();
     const token = s?.session?.access_token;
     const resp = await fetch(BACKEND_URL + '/api/empresa-cargar-pago-cliente', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body:    JSON.stringify({ cliente_profile_id, monto, forma_pago, referencia, comprobante_url }),
+      body:    JSON.stringify({ cliente_codigo, monto, forma_pago, referencia, comprobante_url }),
     });
     const result = await resp.json();
     if (!resp.ok || result.error) throw new Error(result.error || 'Error inesperado');
 
     cerrarModal('modal-cargar-pago-empresa');
-    alert('✓ Pago cargado correctamente. El intermediario va a recibir la notificación.');
+    alert('✓ Pago cargado correctamente. El intermediario va a recibir la notificación.' +
+          (result.perfil_nuevo ? '\n\n(Se creó un perfil sombra para este cliente — sin acceso al portal.)' : ''));
 
     // Refrescar la vista actual si corresponde
-    const main = document.getElementById('main-content');
-    if (main && document.getElementById('nav-pagos-clientes')?.classList.contains('active')) {
+    if (document.getElementById('nav-pagos-clientes')?.classList.contains('active')) {
       renderPagosClientes();
     } else if (document.getElementById('nav-clientes')?.classList.contains('active')) {
       renderClientes();
@@ -2805,8 +2853,27 @@ async function enviarCargarPagoEmpresa() {
   }
 }
 
-// Listener para mostrar el nombre del archivo elegido
+// Listeners del modal — se atan una sola vez al cargar el DOM
 document.addEventListener('DOMContentLoaded', () => {
+  // Filtrado en vivo
+  const buscar = document.getElementById('cpe-cliente-buscar');
+  if (buscar) {
+    buscar.addEventListener('focus', () => _cpeRenderResults(buscar.value));
+    buscar.addEventListener('input', () => {
+      buscar.setAttribute('data-codigo', '');
+      buscar.setAttribute('data-nombre', '');
+      _cpeRenderResults(buscar.value);
+    });
+  }
+  // Cerrar dropdown al click afuera
+  document.addEventListener('click', (e) => {
+    const wrap = document.getElementById('cpe-cliente-selector-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      const r = document.getElementById('cpe-cliente-results');
+      if (r) r.style.display = 'none';
+    }
+  });
+  // Comprobante upload nombre
   const f = document.getElementById('cpe-file');
   if (f) f.addEventListener('change', e => {
     const file = e.target.files[0];
