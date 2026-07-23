@@ -752,6 +752,7 @@ function buildSidebar(rol) {
       { id:'int-enviar', label:'Enviar a empresa' },
       { id:'int-historial', label:'Mi historial' },
       { id:'int-comision', label:'Mi comisión' },
+      { id:'int-reportes', label:'Reportes' },
       { id:'ayuda', label:'Ayuda' },
     ],
     cliente: [
@@ -764,7 +765,7 @@ function buildSidebar(rol) {
   const mobileIcons = {
     'dashboard':'⊞','control-intermediario':'📊','pagos-clientes':'💳',
     'comision-empresa':'💰','clientes':'👥','usuarios':'⚙️',
-    'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰',
+    'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰','int-reportes':'📈',
     'cli-home':'🏠','cli-pagar':'💸','ayuda':'❓'
   };
   nav.innerHTML = '<div class="nav-label">' + esc(rol) + '</div>' +
@@ -807,6 +808,7 @@ async function loadView(id) {
     'int-enviar': ['Enviar a empresa', ''],
     'int-historial': ['Mi historial', ''],
     'int-comision': ['Mi comisión', ''],
+    'int-reportes': ['Reportes', ''],
     'cli-home': ['Mi cuenta', ''],
     'cli-pagar': ['Informar pago', ''],
     'ayuda': ['Ayuda', ''],
@@ -814,7 +816,7 @@ async function loadView(id) {
   const [title, sub] = titles[id] || ['Panel', ''];
   document.getElementById('page-title').textContent = title;
 
-  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar, 'ayuda': renderAyuda };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'int-reportes': renderIntReportes, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar, 'ayuda': renderAyuda };
   if (views[id]) await views[id]();
 }
 
@@ -2177,6 +2179,73 @@ async function renderIntHistorial(desde, hasta) {
   }
 }
 
+// ── COBERTURA FIFO 24hs — algoritmo compartido ──────────────────────────────
+// Un envío a la empresa cubre (FIFO) los pagos de clientes informados hasta 24 hs
+// antes. Comisión: 0,1% sobre lo cubierto por envíos confirmados. Devuelve un item
+// por pago con montoCubierto, estado (califica / parcial / sin_confirmar / vencido /
+// pendiente), comisión y un motivo legible cuando no califica.
+function calcularCoberturaPagos(pagos, enviosConfRaw, enviosPendRaw) {
+  const mkEnvios = raw => (raw || [])
+    .slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+  const enviosConf = mkEnvios(enviosConfRaw);
+  const enviosPend = mkEnvios(enviosPendRaw);
+  const pagosOrdenados = [...(pagos || [])].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  const ahora = Date.now();
+  const detalle = [];
+
+  const cubrir = (envios, monto, fechaRef, deadline) => {
+    let cubierto = 0;
+    for (const e of envios) {
+      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
+      const aplicar = Math.min(monto - cubierto, e.disponible);
+      e.disponible -= aplicar;
+      cubierto += aplicar;
+      if (cubierto >= monto) break;
+    }
+    return cubierto;
+  };
+
+  pagosOrdenados.forEach(p => {
+    const monto = Number(p.monto);
+    const fechaRef = new Date(p.created_at);
+    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
+    const base = { id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null };
+
+    // 1. Cobertura por envíos CONFIRMADOS (cobertura parcial permitida)
+    const cubierto = cubrir(enviosConf, monto, fechaRef, deadline);
+    if (cubierto > 0) {
+      const esFull = cubierto >= monto - 0.001;
+      detalle.push({ ...base, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial',
+        motivo: esFull ? '' : 'Los envíos de las 24 hs solo cubrieron USD ' + fmt(cubierto) + ' de USD ' + fmt(monto) + '; el resto quedó sin cobertura.' });
+      return;
+    }
+
+    // 2. Sin cobertura confirmada — verificar envíos PENDIENTES (sin confirmar)
+    const cubiertoPend = cubrir(enviosPend, monto, fechaRef, deadline);
+    if (cubiertoPend > 0) {
+      detalle.push({ ...base, montoCubierto: 0, califica: false, comision: 0, estado: 'sin_confirmar',
+        motivo: 'Hay un envío dentro de las 24 hs, pero la empresa todavía no lo confirmó.' });
+      return;
+    }
+
+    // 3. Sin cobertura — ¿venció la ventana? Explicar por qué no califica.
+    if (ahora <= deadline.getTime()) {
+      detalle.push({ ...base, montoCubierto: 0, califica: false, comision: 0, estado: 'pendiente',
+        motivo: 'Dentro de la ventana de 24 hs — todavía puede calificar si llega un envío.' });
+      return;
+    }
+    const huboEnVentana = enviosConf.some(e => e.fecha >= fechaRef && e.fecha <= deadline);
+    const envioTarde = enviosConf.find(e => e.fecha > deadline);
+    let motivo;
+    if (huboEnVentana) motivo = 'Hubo envíos en las 24 hs, pero el FIFO los aplicó a pagos anteriores y no quedó saldo para este.';
+    else if (envioTarde) motivo = 'El primer envío llegó ' + Math.round((envioTarde.fecha - fechaRef) / 3600000) + ' hs después del pago (límite: 24 hs).';
+    else motivo = 'No hubo ningún envío a la empresa después de este pago en el período.';
+    detalle.push({ ...base, montoCubierto: 0, califica: false, comision: 0, estado: 'vencido', motivo });
+  });
+  return detalle;
+}
+
 // ── EMPRESA: COMISION INTERMEDIARIO ──
 async function renderComisionEmpresa(year, month) {
   const now = new Date();
@@ -2191,40 +2260,20 @@ async function renderComisionEmpresa(year, month) {
   // el rango de búsqueda de envíos +24hs más allá del cierre del mes.
   const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
 
-  const [pagRes, envRes, pagosComRes] = await Promise.all([
+  const [pagRes, envRes, envPendResEmp, pagosComRes] = await Promise.all([
     db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
+    db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
   const pagos = pagRes.data || [];
-  const envios = envRes.data || [];
   const pagosCom = pagosComRes.data || [];
 
-  // FIFO + 24hs con cobertura parcial: mismo algoritmo que la vista del intermediario
-  const enviosConf = (envios || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
-
-  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  let items = [];
-  pagosOrdenados.forEach(p => {
-    const monto = Number(p.monto);
-    const fechaRef = new Date(p.created_at);
-    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-    let cubierto = 0;
-    for (const e of enviosConf) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubierto, e.disponible);
-      e.disponible -= aplicar;
-      cubierto += aplicar;
-      if (cubierto >= monto) break;
-    }
-    if (cubierto > 0) {
-      const esFull = cubierto >= monto - 0.001;
-      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
-    }
-  });
+  // Cobertura FIFO 24 hs — algoritmo compartido con la vista del intermediario
+  const detalle = calcularCoberturaPagos(pagos, envRes.data, envPendResEmp.data);
+  const items = detalle.filter(i => i.montoCubierto > 0);
+  const sinComision = detalle.filter(i => i.montoCubierto <= 0);
 
   const totalComision = items.reduce((s,i) => s + i.comision, 0);
   const totalPagado = pagosCom.filter(p => {
@@ -2284,6 +2333,24 @@ async function renderComisionEmpresa(year, month) {
     });
   }
   html += '</div>';
+
+  // Pagos SIN comisión del mes, con el motivo: para decidir excepciones (pagarla igual)
+  if (sinComision.length > 0) {
+    const totalSin = sinComision.reduce((s,i) => s + i.monto, 0);
+    html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos sin comisión este mes</div>' +
+      '<span class="badge badge-late">' + sinComision.length + ' pago' + (sinComision.length!==1?'s':'') + ' · USD ' + fmt(totalSin) + '</span></div>';
+    sinComision.forEach(function(item) {
+      const badge = item.estado === 'sin_confirmar'
+        ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+        : item.estado === 'pendiente'
+          ? '<span class="badge badge-pending">En ventana</span>'
+          : '<span class="badge badge-late">No califica</span>';
+      html += '<div class="pago-row"><div class="pago-info"><div class="pago-name">' + esc(item.cliente) + '</div>' +
+        '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + ' · ' + esc(item.motivo || '') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' + badge + '</div>';
+    });
+    html += '<div style="padding:10px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">Si querés reconocer la comisión igual como excepción (0,1% de estos pagos = USD ' + fmtDec(totalSin * 0.001, 2) + '), registrá el pago abajo con una nota.</div></div>';
+  }
 
   html += '<div class="card"><div class="card-header"><div class="card-title">Registrar pago de comision</div></div><div class="form-pad">' +
     '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;font-size:13px">' +
@@ -2528,62 +2595,9 @@ async function renderIntComision(year, month) {
 
   const pagos = pagRes.data || [];
 
-  // FIFO + 24hs sobre envíos confirmados
-  const enviosConf = (envConfRes.data || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
-
-  // Envíos sin confirmar (para mostrar estado intermedio)
-  const enviosPend = (envPendRes.data || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
-
-  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  const ahora = Date.now();
-  let totalComisionBase = 0; // suma de montos cubiertos (total o parcialmente)
-  let detalleComision = [];
-
-  pagosOrdenados.forEach(p => {
-    const monto = Number(p.monto);
-    const fechaRef = new Date(p.created_at);
-    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-    const extra = { forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null };
-
-    // 1. Cobertura por envíos CONFIRMADOS (cobertura parcial permitida)
-    let cubierto = 0;
-    for (const e of enviosConf) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubierto, e.disponible);
-      e.disponible -= aplicar;
-      cubierto += aplicar;
-      if (cubierto >= monto) break;
-    }
-    if (cubierto > 0) {
-      const esFull = cubierto >= monto - 0.001;
-      totalComisionBase += cubierto;
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', ...extra });
-      return;
-    }
-
-    // 2. Sin cobertura confirmada — verificar envíos PENDIENTES (sin confirmar)
-    let cubiertoPend = 0;
-    for (const e of enviosPend) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubiertoPend, e.disponible);
-      e.disponible -= aplicar;
-      cubiertoPend += aplicar;
-      if (cubiertoPend >= monto) break;
-    }
-    if (cubiertoPend > 0) {
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: 'sin_confirmar', ...extra });
-      return;
-    }
-
-    // 3. Sin cobertura — ¿venció la ventana?
-    const vencio = ahora > deadline.getTime();
-    detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
-  });
-
+  // Cobertura FIFO 24 hs — algoritmo compartido (calcularCoberturaPagos)
+  const detalleComision = calcularCoberturaPagos(pagos, envConfRes.data, envPendRes.data);
+  const totalComisionBase = detalleComision.reduce((s, d) => s + d.montoCubierto, 0);
   const comisionTotal = totalComisionBase * 0.001;
   const isMesActualInt = year === now.getFullYear() && month === now.getMonth();
   const c = document.getElementById('main-content');
@@ -2681,6 +2695,222 @@ async function renderIntComision(year, month) {
     let y = year, m = month + 1;
     if (m > 11) { m = 0; y++; }
     renderIntComision(y, m);
+  };
+}
+
+// ── INTERMEDIARIO: REPORTES (anual) ─────────────────────────────────────────
+async function renderIntReportes(year) {
+  const now = new Date();
+  if (year === undefined) year = now.getFullYear();
+  const desde = new Date(year, 0, 1).toISOString();
+  const hasta = new Date(year, 11, 31, 23, 59, 59).toISOString();
+  const hastaMas24h = new Date(new Date(year, 11, 31, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
+
+  // PostgREST corta en 1000 filas por request: paginamos con range()
+  async function fetchAll(mkQuery) {
+    const page = 1000; let all = []; let from = 0;
+    while (true) {
+      const { data } = await mkQuery().range(from, from + page - 1);
+      all = all.concat(data || []);
+      if (!data || data.length < page) break;
+      from += page;
+    }
+    return all;
+  }
+
+  const [pagos, enviosConf, enviosPend, comPagos] = await Promise.all([
+    fetchAll(() => db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', desde).lte('created_at', hasta).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', desde).lte('created_at', hastaMas24h).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', desde).lte('created_at', hastaMas24h).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('comision_pagos').select('*').order('created_at', { ascending: true })),
+  ]);
+
+  const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const ultimoMes = year === now.getFullYear() ? now.getMonth() : 11;
+
+  // Mismo cálculo que "Mi comisión": cada mes corre su propio FIFO, así los números
+  // del reporte coinciden exactamente con la vista mensual.
+  const mensual = []; let detalleAnual = [];
+  for (let m = 0; m <= ultimoMes; m++) {
+    const mIni = new Date(year, m, 1);
+    const mFin = new Date(year, m + 1, 0, 23, 59, 59);
+    const mFin24 = new Date(mFin.getTime() + 24 * 3600000);
+    const enRango = (arr, a, b) => arr.filter(x => { const f = new Date(x.created_at); return f >= a && f <= b; });
+    const detalle = calcularCoberturaPagos(enRango(pagos, mIni, mFin), enRango(enviosConf, mIni, mFin24), enRango(enviosPend, mIni, mFin24));
+    detalle.forEach(d => { d.mes = m; });
+    detalleAnual = detalleAnual.concat(detalle);
+    const volumen = detalle.reduce((s,d) => s + d.monto, 0);
+    const cubierto = detalle.reduce((s,d) => s + d.montoCubierto, 0);
+    const cobrado = comPagos.filter(p => {
+      const f = p.fecha_pago ? new Date(p.fecha_pago + 'T12:00:00') : new Date(p.created_at);
+      return f >= mIni && f <= mFin;
+    }).reduce((s,p) => s + Number(p.monto), 0);
+    mensual.push({ mes: m, pagos: detalle.length, volumen, cubierto, comision: cubierto * 0.001, cobrado });
+  }
+
+  const tot = mensual.reduce((a,r) => ({ pagos: a.pagos + r.pagos, volumen: a.volumen + r.volumen, cubierto: a.cubierto + r.cubierto, comision: a.comision + r.comision, cobrado: a.cobrado + r.cobrado }), { pagos:0, volumen:0, cubierto:0, comision:0, cobrado:0 });
+  const saldoAnual = tot.comision - tot.cobrado;
+
+  // Por cliente: cantidad de pagos separada en califican / parciales / no califican
+  const porCliente = {};
+  detalleAnual.forEach(d => {
+    const k = d.cliente || '-';
+    if (!porCliente[k]) porCliente[k] = { cliente: k, pagos: 0, monto: 0, calif: 0, parcial: 0, noCalif: 0, noCalifMonto: 0, comision: 0 };
+    const c = porCliente[k];
+    c.pagos++; c.monto += d.monto; c.comision += d.comision;
+    if (d.estado === 'califica') c.calif++;
+    else if (d.estado === 'parcial') c.parcial++;
+    else { c.noCalif++; c.noCalifMonto += d.monto; }
+  });
+  const clientes = Object.values(porCliente).sort((a,b) => b.monto - a.monto);
+  const noCalifican = detalleAnual.filter(d => d.estado !== 'califica').sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+
+  const esAnioActual = year === now.getFullYear();
+  const c = document.getElementById('main-content');
+  let html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">' +
+    '<button class="btn btn-sm" id="btn-rep-prev">← ' + (year - 1) + '</button>' +
+    '<span style="font-size:14px;font-weight:500;min-width:120px;text-align:center">Año ' + year + '</span>' +
+    '<button class="btn btn-sm" id="btn-rep-next"' + (esAnioActual ? ' disabled' : '') + '>' + (year + 1) + ' →</button>' +
+    '</div>';
+
+  html += '<div class="metrics" style="margin-bottom:20px">' +
+    '<div class="metric"><div class="metric-label">Volumen procesado</div><div class="metric-value">USD ' + fmt(tot.volumen) + '</div><div class="metric-sub">' + tot.pagos + ' pago' + (tot.pagos!==1?'s':'') + ' de clientes en ' + year + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Comisión ganada</div><div class="metric-value ok">USD ' + fmtDec(tot.comision, 2) + '</div><div class="metric-sub">0,1% sobre USD ' + fmt(tot.cubierto) + ' cubierto en 24 hs</div></div>' +
+    '<div class="metric"><div class="metric-label">Cobrado</div><div class="metric-value">USD ' + fmtDec(tot.cobrado, 2) + '</div><div class="metric-sub">pagos de comisión recibidos</div></div>' +
+    '<div class="metric"><div class="metric-label">Saldo a favor</div><div class="metric-value ' + (saldoAnual > 0.005 ? 'danger' : 'ok') + '">USD ' + fmtDec(Math.max(saldoAnual, 0), 2) + '</div><div class="metric-sub">' + (saldoAnual > 0.005 ? 'pendiente de cobro' : 'al día') + '</div></div>' +
+    '</div>';
+
+  // Gráfico de barras: volumen por mes
+  const maxVol = Math.max.apply(null, mensual.map(r => r.volumen).concat([1]));
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Volumen por mes</div></div>' +
+    '<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:20px 20px 6px">' +
+    mensual.map(r =>
+      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end" title="' + MESES[r.mes] + ': USD ' + fmt(r.volumen) + ' · comisión USD ' + fmtDec(r.comision, 2) + '">' +
+      '<div style="font-size:9px;color:var(--text3);font-family:\'DM Mono\',monospace;white-space:nowrap">' + (r.volumen > 0 ? fmt(r.volumen) : '') + '</div>' +
+      '<div style="width:100%;max-width:42px;background:var(--blue);opacity:.85;border-radius:4px 4px 0 0;height:' + (r.volumen > 0 ? Math.max(r.volumen / maxVol * 100, 2) : 0) + 'px"></div>' +
+      '</div>').join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px;padding:0 20px 14px">' +
+    mensual.map(r => '<div style="flex:1;text-align:center;font-size:10px;color:var(--text3)">' + MESES[r.mes] + '</div>').join('') +
+    '</div></div>';
+
+  // Tabla mensual
+  const tdNum = 'padding:10px 8px;text-align:right;font-family:\'DM Mono\',monospace;font-size:12px';
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Detalle mensual</div><button class="btn btn-sm" id="btn-export-reporte">Exportar Excel</button></div>' +
+    '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">' +
+    '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+    '<th style="text-align:left;padding:10px 20px;font-weight:600">Mes</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Pagos</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Volumen</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Cubierto 24 hs</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Comisión</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Cobrado</th>' +
+    '<th style="text-align:right;padding:10px 20px;font-weight:600">Saldo</th>' +
+    '</tr></thead><tbody>';
+  mensual.forEach(r => {
+    const saldo = r.comision - r.cobrado;
+    html += '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:10px 20px;text-transform:capitalize">' + new Date(year, r.mes, 1).toLocaleString('es-AR', { month: 'long' }) + '</td>' +
+      '<td style="' + tdNum + '">' + r.pagos + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmt(r.volumen) + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmt(r.cubierto) + '</td>' +
+      '<td style="' + tdNum + ';color:var(--green);font-weight:600">USD ' + fmtDec(r.comision, 2) + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmtDec(r.cobrado, 2) + '</td>' +
+      '<td style="' + tdNum.replace('8px','20px') + ';color:' + (saldo > 0.005 ? 'var(--red)' : 'var(--text2)') + '">USD ' + fmtDec(saldo, 2) + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:700">' +
+    '<td style="padding:10px 20px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3)">Total ' + year + '</td>' +
+    '<td style="' + tdNum + '">' + tot.pagos + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmt(tot.volumen) + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmt(tot.cubierto) + '</td>' +
+    '<td style="' + tdNum + ';color:var(--green)">USD ' + fmtDec(tot.comision, 2) + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmtDec(tot.cobrado, 2) + '</td>' +
+    '<td style="' + tdNum.replace('8px','20px') + ';color:' + (saldoAnual > 0.005 ? 'var(--red)' : 'var(--text2)') + '">USD ' + fmtDec(saldoAnual, 2) + '</td>' +
+    '</tr></tfoot></table></div></div>';
+
+  // Por cliente
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Por cliente</div></div>';
+  if (clientes.length === 0) {
+    html += '<div class="empty-state">Sin pagos en ' + year + '.</div>';
+  } else {
+    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">' +
+      '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+      '<th style="text-align:left;padding:10px 20px;font-weight:600">Cliente</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Pagos</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Califican</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Parciales</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">No califican</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Volumen</th>' +
+      '<th style="text-align:right;padding:10px 20px;font-weight:600">Comisión</th>' +
+      '</tr></thead><tbody>';
+    clientes.forEach(cl => {
+      html += '<tr style="border-bottom:1px solid var(--border)">' +
+        '<td style="padding:10px 20px;font-weight:500">' + esc(cl.cliente) + '</td>' +
+        '<td style="' + tdNum + '">' + cl.pagos + '</td>' +
+        '<td style="' + tdNum + ';color:var(--green)">' + cl.calif + '</td>' +
+        '<td style="' + tdNum + ';color:' + (cl.parcial > 0 ? 'var(--amber)' : 'var(--text3)') + '">' + cl.parcial + '</td>' +
+        '<td style="' + tdNum + ';color:' + (cl.noCalif > 0 ? 'var(--red)' : 'var(--text3)') + '">' + cl.noCalif + (cl.noCalif > 0 ? ' · USD ' + fmt(cl.noCalifMonto) : '') + '</td>' +
+        '<td style="' + tdNum + '">USD ' + fmt(cl.monto) + '</td>' +
+        '<td style="' + tdNum.replace('8px','20px') + ';color:var(--green);font-weight:600">USD ' + fmtDec(cl.comision, 2) + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  // Pagos que no calificaron (o calificaron parcial), con el motivo
+  const totalNoCalif = noCalifican.reduce((s,d) => s + (d.monto - d.montoCubierto), 0);
+  html += '<div class="card"><div class="card-header"><div class="card-title">Pagos que no calificaron</div>' +
+    (noCalifican.length > 0 ? '<span class="badge badge-late">' + noCalifican.length + ' pago' + (noCalifican.length!==1?'s':'') + ' · USD ' + fmt(totalNoCalif) + ' sin cobertura</span>' : '') +
+    '</div>';
+  if (noCalifican.length === 0) {
+    html += '<div class="empty-state">Todos los pagos de ' + year + ' calificaron. ✓</div>';
+  } else {
+    noCalifican.forEach(d => {
+      const badge = d.estado === 'parcial'
+        ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+        : d.estado === 'sin_confirmar'
+          ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+          : d.estado === 'pendiente'
+            ? '<span class="badge badge-pending">En ventana</span>'
+            : '<span class="badge badge-late">No califica</span>';
+      html += '<div class="pago-row"><div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
+        '<div class="pago-sub">' + MESES[d.mes] + ' · ' + new Date(d.fecha).toLocaleString('es-AR') + ' · ' + esc(d.motivo || '') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' + badge + '</div>';
+    });
+    html += '<div style="padding:10px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">La comisión de estos pagos no se genera sola, pero la empresa puede reconocerla igual como excepción (0,1% de lo sin cobertura = USD ' + fmtDec(totalNoCalif * 0.001, 2) + ').</div>';
+  }
+  html += '</div>';
+
+  c.innerHTML = html;
+
+  const btnPrev = document.getElementById('btn-rep-prev');
+  const btnNext = document.getElementById('btn-rep-next');
+  if (btnPrev) btnPrev.onclick = function() { renderIntReportes(year - 1); };
+  if (btnNext && !esAnioActual) btnNext.onclick = function() { renderIntReportes(year + 1); };
+
+  const btnExp = document.getElementById('btn-export-reporte');
+  if (btnExp) btnExp.onclick = function() {
+    const wb = XLSX.utils.book_new();
+    const r1 = [['REPORTE ANUAL ' + year + ' — INTERMEDIARIO'], [], ['Mes','Pagos','Volumen USD','Cubierto 24hs USD','Comisión USD','Cobrado USD','Saldo USD']];
+    mensual.forEach(r => r1.push([MESES[r.mes], r.pagos, r.volumen, r.cubierto, parseFloat(r.comision.toFixed(2)), parseFloat(r.cobrado.toFixed(2)), parseFloat((r.comision - r.cobrado).toFixed(2))]));
+    r1.push([]);
+    r1.push(['TOTAL', tot.pagos, tot.volumen, tot.cubierto, parseFloat(tot.comision.toFixed(2)), parseFloat(tot.cobrado.toFixed(2)), parseFloat(saldoAnual.toFixed(2))]);
+    const ws1 = XLSX.utils.aoa_to_sheet(r1);
+    ws1['!cols'] = [{wch:12},{wch:8},{wch:14},{wch:16},{wch:14},{wch:12},{wch:12}];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Mensual');
+    const r2 = [['POR CLIENTE — ' + year], [], ['Cliente','Pagos','Califican','Parciales','No califican','Volumen USD','Sin cobertura USD','Comisión USD']];
+    clientes.forEach(cl => r2.push([cl.cliente, cl.pagos, cl.calif, cl.parcial, cl.noCalif, cl.monto, cl.noCalifMonto, parseFloat(cl.comision.toFixed(2))]));
+    const ws2 = XLSX.utils.aoa_to_sheet(r2);
+    ws2['!cols'] = [{wch:30},{wch:8},{wch:10},{wch:10},{wch:12},{wch:14},{wch:16},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Por cliente');
+    const r3 = [['PAGOS QUE NO CALIFICARON — ' + year], [], ['Cliente','Fecha','Monto USD','Cubierto USD','Estado','Motivo']];
+    noCalifican.forEach(d => r3.push([d.cliente, new Date(d.fecha).toLocaleString('es-AR'), d.monto, d.montoCubierto, d.estado, d.motivo || '']));
+    const ws3 = XLSX.utils.aoa_to_sheet(r3);
+    ws3['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:12},{wch:14},{wch:70}];
+    XLSX.utils.book_append_sheet(wb, ws3, 'No califican');
+    XLSX.writeFile(wb, 'reporte_intermediario_' + year + '.xlsx');
   };
 }
 
