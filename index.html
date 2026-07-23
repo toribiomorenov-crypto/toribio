@@ -2881,9 +2881,11 @@ async function renderIntReportes(year) {
   const porCliente = {};
   detalleAnual.forEach(d => {
     const k = d.cliente || '-';
-    if (!porCliente[k]) porCliente[k] = { cliente: k, pagos: 0, monto: 0, calif: 0, parcial: 0, noCalif: 0, noCalifMonto: 0, excepciones: 0, comision: 0, perdida: 0 };
+    if (!porCliente[k]) porCliente[k] = { cliente: k, pagos: 0, monto: 0, calif: 0, parcial: 0, noCalif: 0, noCalifMonto: 0, excepciones: 0, comision: 0, perdida: 0, demoraSum: 0, demoraN: 0, items: [] };
     const c = porCliente[k];
     c.pagos++; c.monto += d.monto; c.comision += d.comision; c.perdida += d.comisionPerdida;
+    c.items.push(d);
+    if (d.demoraHs != null) { c.demoraSum += d.demoraHs; c.demoraN++; }
     if (d.excepcion) c.excepciones++;
     if (d.estado === 'califica') c.calif++;
     else if (d.estado === 'parcial') c.parcial++;
@@ -2972,21 +2974,48 @@ async function renderIntReportes(year) {
       '<th style="text-align:right;padding:10px 8px;font-weight:600">Califican</th>' +
       '<th style="text-align:right;padding:10px 8px;font-weight:600">Parciales</th>' +
       '<th style="text-align:right;padding:10px 8px;font-weight:600">No califican</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Prom. envío</th>' +
       '<th style="text-align:right;padding:10px 8px;font-weight:600">Volumen</th>' +
       '<th style="text-align:right;padding:10px 8px;font-weight:600">Perdida</th>' +
       '<th style="text-align:right;padding:10px 20px;font-weight:600">Comisión</th>' +
       '</tr></thead><tbody>';
-    clientes.forEach(cl => {
-      html += '<tr style="border-bottom:1px solid var(--border)">' +
-        '<td style="padding:10px 20px;font-weight:500">' + esc(cl.cliente) + '</td>' +
+    clientes.forEach((cl, ci) => {
+      const prom = cl.demoraN > 0 ? cl.demoraSum / cl.demoraN : null;
+      html += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="toggleClienteDetail(' + ci + ')">' +
+        '<td style="padding:10px 20px;font-weight:500"><span style="color:var(--text3);font-size:12px;user-select:none;margin-right:6px" id="arr-cli-' + ci + '">›</span>' + esc(cl.cliente) + '</td>' +
         '<td style="' + tdNum + '">' + cl.pagos + '</td>' +
         '<td style="' + tdNum + ';color:var(--green)">' + cl.calif + '</td>' +
         '<td style="' + tdNum + ';color:' + (cl.parcial > 0 ? 'var(--amber)' : 'var(--text3)') + '">' + cl.parcial + '</td>' +
         '<td style="' + tdNum + ';color:' + (cl.noCalif > 0 ? 'var(--red)' : 'var(--text3)') + '">' + cl.noCalif + (cl.noCalif > 0 ? ' · USD ' + fmt(cl.noCalifMonto) : '') + (cl.excepciones > 0 ? ' <span style="color:var(--blue)">(' + cl.excepciones + ' c/exc.)</span>' : '') + '</td>' +
+        '<td style="' + tdNum + ';font-weight:600;color:' + (prom == null ? 'var(--text3)' : prom <= 24 ? 'var(--green)' : 'var(--red)') + '">' + (prom == null ? '—' : fmtDemora(prom)) + '</td>' +
         '<td style="' + tdNum + '">USD ' + fmt(cl.monto) + '</td>' +
         '<td style="' + tdNum + ';color:' + (cl.perdida > 0.005 ? 'var(--red)' : 'var(--text3)') + '">' + (cl.perdida > 0.005 ? 'USD ' + fmtDec(cl.perdida, 2) : '—') + '</td>' +
         '<td style="' + tdNum.replace('8px','20px') + ';color:var(--green);font-weight:600">USD ' + fmtDec(cl.comision, 2) + '</td>' +
         '</tr>';
+      // Detalle pago x pago del cliente (fila oculta, se abre al clickear la fila)
+      html += '<tr id="det-cli-' + ci + '" style="display:none"><td colspan="9" style="padding:0;background:var(--surface2);border-bottom:1px solid var(--border)">' +
+        '<div style="padding:10px 20px">' +
+        cl.items.map(d => {
+          const est = d.excepcion
+            ? '<span class="badge badge-confirmed">Excepción · USD ' + fmtDec(d.comision, 2) + '</span>'
+            : d.estado === 'califica'
+              ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
+              : d.estado === 'parcial'
+                ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+                : d.estado === 'sin_confirmar'
+                  ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+                  : d.estado === 'pendiente'
+                    ? '<span class="badge badge-pending">En ventana</span>'
+                    : '<span class="badge badge-late">No califica' + (d.comisionPerdida > 0.005 ? ' · −USD ' + fmtDec(d.comisionPerdida, 2) : '') + '</span>';
+          return '<div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">' +
+            '<span style="color:var(--text2);min-width:130px">' + new Date(d.fecha).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) + '</span>' +
+            '<span style="font-family:\'DM Mono\',monospace;font-weight:600;min-width:110px;text-align:right">USD ' + fmt(d.monto) + '</span>' +
+            '<span style="min-width:150px">tardó <span style="font-weight:600;color:' + (d.demoraHs != null && d.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + '">' + fmtDemora(d.demoraHs) + '</span></span>' +
+            est +
+            '</div>';
+        }).join('') +
+        '<div style="padding-top:8px;font-size:11px;color:var(--text3)">Promedio del cliente: ' + (prom == null ? 'sin envíos' : fmtDemora(prom) + ' (límite 24 hs)') + '</div>' +
+        '</div></td></tr>';
     });
     html += '</tbody></table></div>';
   }
@@ -3051,10 +3080,10 @@ async function renderIntReportes(year) {
     const ws1 = XLSX.utils.aoa_to_sheet(r1);
     ws1['!cols'] = [{wch:12},{wch:8},{wch:14},{wch:16},{wch:14},{wch:12},{wch:12},{wch:12}];
     XLSX.utils.book_append_sheet(wb, ws1, 'Mensual');
-    const r2 = [['POR CLIENTE — ' + year], [], ['Cliente','Pagos','Califican','Parciales','No califican','Excepciones','Volumen USD','Sin cobertura USD','Perdida USD','Comisión USD']];
-    clientes.forEach(cl => r2.push([cl.cliente, cl.pagos, cl.calif, cl.parcial, cl.noCalif, cl.excepciones, cl.monto, cl.noCalifMonto, parseFloat(cl.perdida.toFixed(2)), parseFloat(cl.comision.toFixed(2))]));
+    const r2 = [['POR CLIENTE — ' + year], [], ['Cliente','Pagos','Califican','Parciales','No califican','Excepciones','Prom envio hs','Volumen USD','Sin cobertura USD','Perdida USD','Comisión USD']];
+    clientes.forEach(cl => r2.push([cl.cliente, cl.pagos, cl.calif, cl.parcial, cl.noCalif, cl.excepciones, cl.demoraN > 0 ? Math.round(cl.demoraSum / cl.demoraN) : '', cl.monto, cl.noCalifMonto, parseFloat(cl.perdida.toFixed(2)), parseFloat(cl.comision.toFixed(2))]));
     const ws2 = XLSX.utils.aoa_to_sheet(r2);
-    ws2['!cols'] = [{wch:30},{wch:8},{wch:10},{wch:10},{wch:12},{wch:12},{wch:14},{wch:16},{wch:12},{wch:14}];
+    ws2['!cols'] = [{wch:30},{wch:8},{wch:10},{wch:10},{wch:12},{wch:12},{wch:13},{wch:14},{wch:16},{wch:12},{wch:14}];
     XLSX.utils.book_append_sheet(wb, ws2, 'Por cliente');
     const r3 = [['PAGOS QUE NO CALIFICARON — ' + year], [], ['Cliente','Fecha','Monto USD','Cubierto USD','Demora hs','Perdida USD','Excepcion','Estado','Motivo']];
     noCalifican.forEach(d => r3.push([d.cliente, new Date(d.fecha).toLocaleString('es-AR'), d.monto, d.montoCubierto, d.demoraHs != null ? Math.round(d.demoraHs) : '', parseFloat((d.comisionPerdida||0).toFixed(2)), d.excepcion ? 'SI' + (d.excepcionNota ? ' (' + d.excepcionNota + ')' : '') : '', d.estado, d.motivo || '']));
@@ -3489,6 +3518,16 @@ function interesMora(saldo, diasVencidos) {
   var atraso = d < 0 ? -d : 0;
   return (Number(saldo) || 0) * TASA_MORA_MENSUAL * (atraso / 30);
 }
+// Toggle de la fila-detalle de un cliente en Reportes (es un <tr>, no un div)
+function toggleClienteDetail(i) {
+  const el = document.getElementById('det-cli-' + i);
+  if (!el) return;
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'table-row' : 'none';
+  const arr = document.getElementById('arr-cli-' + i);
+  if (arr) arr.textContent = open ? '⌄' : '›';
+}
+
 function toggleComisionDetail(id) {
   const el = document.getElementById(id);
   if (!el) return;
