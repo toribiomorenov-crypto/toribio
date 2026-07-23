@@ -752,6 +752,7 @@ function buildSidebar(rol) {
       { id:'int-enviar', label:'Enviar a empresa' },
       { id:'int-historial', label:'Mi historial' },
       { id:'int-comision', label:'Mi comisión' },
+      { id:'int-reportes', label:'Reportes' },
       { id:'ayuda', label:'Ayuda' },
     ],
     cliente: [
@@ -764,7 +765,7 @@ function buildSidebar(rol) {
   const mobileIcons = {
     'dashboard':'⊞','control-intermediario':'📊','pagos-clientes':'💳',
     'comision-empresa':'💰','clientes':'👥','usuarios':'⚙️',
-    'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰',
+    'int-home':'📥','int-enviar':'📤','int-historial':'📋','int-comision':'💰','int-reportes':'📈',
     'cli-home':'🏠','cli-pagar':'💸','ayuda':'❓'
   };
   nav.innerHTML = '<div class="nav-label">' + esc(rol) + '</div>' +
@@ -807,6 +808,7 @@ async function loadView(id) {
     'int-enviar': ['Enviar a empresa', ''],
     'int-historial': ['Mi historial', ''],
     'int-comision': ['Mi comisión', ''],
+    'int-reportes': ['Reportes', ''],
     'cli-home': ['Mi cuenta', ''],
     'cli-pagar': ['Informar pago', ''],
     'ayuda': ['Ayuda', ''],
@@ -814,7 +816,7 @@ async function loadView(id) {
   const [title, sub] = titles[id] || ['Panel', ''];
   document.getElementById('page-title').textContent = title;
 
-  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar, 'ayuda': renderAyuda };
+  const views = { 'dashboard': renderDashboard, 'int-comision': renderIntComision, 'clientes': renderClientes, 'comision-empresa': renderComisionEmpresa, 'control-intermediario': renderControlIntermediario, 'pagos-clientes': renderPagosClientes, 'usuarios': renderUsuarios, 'int-home': renderIntHome, 'int-enviar': renderIntEnviar, 'int-historial': renderIntHistorial, 'int-reportes': renderIntReportes, 'cli-home': renderCliHome, 'cli-pagar': renderCliPagar, 'ayuda': renderAyuda };
   if (views[id]) await views[id]();
 }
 
@@ -841,6 +843,7 @@ async function renderDashboard() {
   const vencidas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos <= 0);
   const proximas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos > 0 && f.dias_vencidos <= 7);
   const totalVencidoUsd = vencidas.reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const totalInteresUsd = vencidas.reduce((s, f) => s + interesMora(f.saldo, f.dias_vencidos), 0);
   const totalProximasUsd = proximas.reduce((s, f) => s + Number(f.saldo || 0), 0);
   const clientesVencidos = new Set(vencidas.map(f => f.cliente_codigo)).size;
   const ultimaSyncFacturas = facturas[0]?.synced_at;
@@ -868,7 +871,7 @@ async function renderDashboard() {
     cobranzasHtml += '<div class="card section-gap"><div class="card-header">' +
       '<div class="card-title">Cobranzas — facturas vencidas</div>' +
       (vencidas.length > 0
-        ? '<span class="badge badge-late">USD ' + fmt(totalVencidoUsd) + ' · ' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' de ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</span>'
+        ? '<span class="badge badge-late">USD ' + fmt(totalVencidoUsd) + (totalInteresUsd > 0 ? ' + ' + fmt(totalInteresUsd) + ' int.' : '') + ' · ' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' de ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</span>'
         : '<span class="badge badge-released">Sin vencidas ✓</span>'
       ) +
       '</div>';
@@ -882,7 +885,8 @@ async function renderDashboard() {
         '<th style="text-align:left;padding:10px 8px;font-weight:600">Nro</th>' +
         '<th style="text-align:left;padding:10px 8px;font-weight:600">Vencimiento</th>' +
         '<th style="text-align:right;padding:10px 16px;font-weight:600">Días atrás</th>' +
-        '<th style="text-align:right;padding:10px 20px;font-weight:600">Saldo</th>' +
+        '<th style="text-align:right;padding:10px 16px;font-weight:600">Saldo</th>' +
+        '<th style="text-align:right;padding:10px 20px;font-weight:600">Interés (4%/mes)</th>' +
         '</tr></thead><tbody>';
       const TOP = 20;
       vencidas.slice(0, TOP).forEach(function(f) {
@@ -894,10 +898,15 @@ async function renderDashboard() {
           '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:11px 8px;color:var(--red);font-weight:500">' + fVto + '</td>' +
           '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--red);font-weight:700">' + diasLabel + '</td>' +
-          '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">' + (interesMora(f.saldo, f.dias_vencidos) > 0 ? 'USD ' + fmt(interesMora(f.saldo, f.dias_vencidos)) : '—') + '</td>' +
           '</tr>';
       });
-      cobranzasHtml += '</tbody></table></div>';
+      cobranzasHtml += '</tbody><tfoot><tr style="border-top:2px solid var(--border)">' +
+        '<td colspan="4" style="padding:11px 16px;text-align:right;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600">Totales' + (vencidas.length > TOP ? ' (todas las vencidas)' : '') + '</td>' +
+        '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(totalVencidoUsd) + '</td>' +
+        '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">USD ' + fmt(totalInteresUsd) + '</td>' +
+        '</tr></tfoot></table></div>';
       if (vencidas.length > TOP) {
         cobranzasHtml += '<div style="padding:12px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">+ ' + (vencidas.length - TOP) + ' factura' + (vencidas.length - TOP !== 1 ? 's' : '') + ' vencida' + (vencidas.length - TOP !== 1 ? 's' : '') + ' más · <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="loadView(\'clientes\')">Ver en Clientes →</span></div>';
       }
@@ -936,7 +945,7 @@ async function renderDashboard() {
   c.innerHTML =
     (enPoderIntermediario > 0 ? '<div class="alert alert-danger"><span class="alert-icon">!</span><div><strong>El intermediario tiene USD ' + fmt(enPoderIntermediario) + ' en su poder</strong> que aún no fueron enviados a la empresa.</div></div>' : '') +
     '<div class="metrics">' +
-    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value ' + (totalVencidoUsd > 0 ? 'danger' : 'ok') + '">USD ' + fmt(totalVencidoUsd) + '</div><div class="metric-sub">' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' · ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Total vencido</div><div class="metric-value ' + (totalVencidoUsd > 0 ? 'danger' : 'ok') + '">USD ' + fmt(totalVencidoUsd) + '</div><div class="metric-sub">' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' · ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</div>' + (totalInteresUsd > 0 ? '<div class="metric-sub" style="color:var(--amber);font-weight:600">+ USD ' + fmt(totalInteresUsd) + ' interés (4%/mes) · deuda total USD ' + fmt(totalVencidoUsd + totalInteresUsd) + '</div>' : '') + '</div>' +
     '<div class="metric"><div class="metric-label">En poder del intermediario</div><div class="metric-value ' + (enPoderIntermediario > 0 ? 'danger' : 'ok') + '">USD ' + fmt(enPoderIntermediario) + '</div><div class="metric-sub">recibido − enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos sin confirmar</div><div class="metric-value ' + (pendientesConfirmar > 0 ? 'danger' : '') + '">' + pendientesConfirmar + '</div><div class="metric-sub">esperando al intermediario</div></div>' +
     '<div class="metric"><div class="metric-label">Promedio de demora</div><div class="metric-value ' + (promedioDias === null ? '' : promedioOk ? 'ok' : 'danger') + '">' + promedioLabel + '</div><div class="metric-sub">desde pago del cliente</div></div>' +
@@ -1475,9 +1484,10 @@ async function abrirDetalleSaldo(codigo) {
   if (facturas && facturas.length > 0) {
     // dias_vencidos: negative = overdue by N days, 0 = due today, positive = due in N days
     const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s,f) => s + Number(f.saldo), 0);
+    const totalInteres = facturas.reduce((s,f) => s + interesMora(f.saldo, f.dias_vencidos), 0);
     html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:8px">' +
       'Facturas pendientes (' + facturas.length + ')' +
-      (totalVencido > 0 ? ' &nbsp;·&nbsp; <span style="color:var(--red)">USD ' + fmt(totalVencido) + ' vencido</span>' : '') +
+      (totalVencido > 0 ? ' &nbsp;·&nbsp; <span style="color:var(--red)">USD ' + fmt(totalVencido) + ' vencido</span>' + (totalInteres > 0 ? ' &nbsp;·&nbsp; <span style="color:var(--amber)">USD ' + fmt(totalInteres) + ' interés</span>' : '') : '') +
       '</div>';
     html += '<div style="overflow-x:auto;margin-bottom:14px"><table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border)">' +
@@ -1486,6 +1496,7 @@ async function abrirDetalleSaldo(codigo) {
       '<th style="text-align:left;padding:6px 4px;font-weight:500">Vto.</th>' +
       '<th style="text-align:right;padding:6px 4px;font-weight:500">Total</th>' +
       '<th style="text-align:right;padding:6px 4px;font-weight:500">Saldo</th>' +
+      '<th style="text-align:right;padding:6px 4px;font-weight:500">Interés</th>' +
       '<th style="text-align:right;padding:6px 4px;font-weight:500">Estado</th>' +
       '</tr></thead><tbody>';
     facturas.forEach(function(f) {
@@ -1499,6 +1510,7 @@ async function abrirDetalleSaldo(codigo) {
         '<td style="padding:7px 4px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + '">' + fVto + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace">USD ' + fmt(f.total || 0) + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+        '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:600;color:var(--amber)">' + (interesMora(f.saldo, f.dias_vencidos) > 0 ? 'USD ' + fmt(interesMora(f.saldo, f.dias_vencidos)) : '—') + '</td>' +
         '<td style="padding:7px 4px;text-align:right;font-family:\'DM Mono\',monospace;font-size:11px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green)') + '">' + diasLabel + '</td>' +
         '</tr>';
     });
@@ -1744,6 +1756,7 @@ async function renderIntHome() {
   const vencidas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos <= 0);
   const proximas = facturas.filter(f => f.dias_vencidos != null && f.dias_vencidos > 0 && f.dias_vencidos <= 7);
   const totalVencidoUsd = vencidas.reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const totalInteresUsd = vencidas.reduce((s, f) => s + interesMora(f.saldo, f.dias_vencidos), 0);
   const totalProximasUsd = proximas.reduce((s, f) => s + Number(f.saldo || 0), 0);
   const clientesVencidos = new Set(vencidas.map(f => f.cliente_codigo)).size;
   const ultimaSyncFacturas = facturas[0]?.synced_at;
@@ -1754,7 +1767,7 @@ async function renderIntHome() {
     cobranzasHtml += '<div class="card section-gap"><div class="card-header">' +
       '<div class="card-title">Cobranzas — facturas vencidas <span style="font-weight:400;font-size:12px;color:var(--text3)">· ECR</span></div>' +
       (vencidas.length > 0
-        ? '<span class="badge badge-late">USD ' + fmt(totalVencidoUsd) + ' · ' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' de ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</span>'
+        ? '<span class="badge badge-late">USD ' + fmt(totalVencidoUsd) + (totalInteresUsd > 0 ? ' + ' + fmt(totalInteresUsd) + ' int.' : '') + ' · ' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' de ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</span>'
         : '<span class="badge badge-released">Sin vencidas ✓</span>'
       ) +
       '</div>';
@@ -1768,7 +1781,8 @@ async function renderIntHome() {
         '<th style="text-align:left;padding:10px 8px;font-weight:600">Nro</th>' +
         '<th style="text-align:left;padding:10px 8px;font-weight:600">Vencimiento</th>' +
         '<th style="text-align:right;padding:10px 16px;font-weight:600">Días atrás</th>' +
-        '<th style="text-align:right;padding:10px 20px;font-weight:600">Saldo</th>' +
+        '<th style="text-align:right;padding:10px 16px;font-weight:600">Saldo</th>' +
+        '<th style="text-align:right;padding:10px 20px;font-weight:600">Interés (4%/mes)</th>' +
         '</tr></thead><tbody>';
       const TOP = 20;
       vencidas.slice(0, TOP).forEach(function(f) {
@@ -1780,10 +1794,15 @@ async function renderIntHome() {
           '<td style="padding:11px 8px;font-family:\'DM Mono\',monospace;font-size:12px">' + (f.nro_oficial ? '<a href="#" onclick="descargarFactura(\'' + esc(f.nro_oficial) + '\', this); return false;" style="color:var(--blue);text-decoration:underline;cursor:pointer" title="Descargar PDF">' + esc(f.nro_oficial) + '</a>' : '<span style="color:var(--text3)">-</span>') + '</td>' +
           '<td style="padding:11px 8px;color:var(--red);font-weight:500">' + fVto + '</td>' +
           '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--red);font-weight:700">' + diasLabel + '</td>' +
-          '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+          '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">' + (interesMora(f.saldo, f.dias_vencidos) > 0 ? 'USD ' + fmt(interesMora(f.saldo, f.dias_vencidos)) : '—') + '</td>' +
           '</tr>';
       });
-      cobranzasHtml += '</tbody></table></div>';
+      cobranzasHtml += '</tbody><tfoot><tr style="border-top:2px solid var(--border)">' +
+        '<td colspan="4" style="padding:11px 16px;text-align:right;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600">Totales' + (vencidas.length > TOP ? ' (todas las vencidas)' : '') + '</td>' +
+        '<td style="padding:11px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(totalVencidoUsd) + '</td>' +
+        '<td style="padding:11px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">USD ' + fmt(totalInteresUsd) + '</td>' +
+        '</tr></tfoot></table></div>';
       if (vencidas.length > TOP) {
         cobranzasHtml += '<div style="padding:12px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">+ ' + (vencidas.length - TOP) + ' factura' + (vencidas.length - TOP !== 1 ? 's' : '') + ' vencida' + (vencidas.length - TOP !== 1 ? 's' : '') + ' más</div>';
       }
@@ -1825,7 +1844,7 @@ async function renderIntHome() {
     (lista.length > 0 ? '<div class="alert alert-danger" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span class="alert-icon">!</span><strong>' + lista.length + ' pago' + (lista.length>1?'s':'') + ' pendiente' + (lista.length>1?'s':'') + ' de confirmar</strong></div></div>' : '') +
     (enviosPendConf.length > 0 ? '<div class="alert" style="background:var(--blue-bg,#EFF6FF);border-color:#BFDBFE;color:#1E40AF;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:20px;"><div style="display:flex;align-items:center;gap:10px"><span>📤</span><strong>' + enviosPendConf.length + ' envío' + (enviosPendConf.length>1?'s':'') + ' esperando confirmación de la empresa</strong></div></div>' : '') +
     '<div class="metrics" style="margin-bottom:20px;">' +
-    '<div class="metric"><div class="metric-label">Vencido (ECR)</div><div class="metric-value ' + (totalVencidoUsd > 0 ? 'danger' : 'ok') + '">USD ' + fmt(totalVencidoUsd) + '</div><div class="metric-sub">' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' · ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Vencido (ECR)</div><div class="metric-value ' + (totalVencidoUsd > 0 ? 'danger' : 'ok') + '">USD ' + fmt(totalVencidoUsd) + '</div><div class="metric-sub">' + vencidas.length + ' factura' + (vencidas.length!==1?'s':'') + ' · ' + clientesVencidos + ' cliente' + (clientesVencidos!==1?'s':'') + '</div>' + (totalInteresUsd > 0 ? '<div class="metric-sub" style="color:var(--amber);font-weight:600">+ USD ' + fmt(totalInteresUsd) + ' interés (4%/mes) · deuda total USD ' + fmt(totalVencidoUsd + totalInteresUsd) + '</div>' : '') + '</div>' +
     '<div class="metric"><div class="metric-label">Saldo a enviar</div><div class="metric-value ' + (saldo>0?'danger':'ok') + '">USD ' + fmt(saldo) + '</div><div class="metric-sub">confirmado - enviado</div></div>' +
     '<div class="metric"><div class="metric-label">Pagos a confirmar</div><div class="metric-value ' + (lista.length>0?'danger':'') + '">' + lista.length + '</div><div class="metric-sub">de clientes</div></div>' +
     '<div class="metric"><div class="metric-label">Envíos pendientes</div><div class="metric-value ' + (enviosPendConf.length>0?'danger':'') + '">' + enviosPendConf.length + '</div><div class="metric-sub">sin confirmar empresa</div></div>' +
@@ -2177,6 +2196,95 @@ async function renderIntHistorial(desde, hasta) {
   }
 }
 
+// ── COBERTURA FIFO 24hs — algoritmo compartido ──────────────────────────────
+// Un envío a la empresa cubre (FIFO) los pagos de clientes informados hasta 24 hs
+// antes. Comisión: 0,1% sobre lo cubierto por envíos confirmados. Devuelve un item
+// por pago con montoCubierto, estado (califica / parcial / sin_confirmar / vencido /
+// pendiente), comisión y un motivo legible cuando no califica.
+function calcularCoberturaPagos(pagos, enviosConfRaw, enviosPendRaw) {
+  const mkEnvios = raw => (raw || [])
+    .slice().sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
+    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+  const enviosConf = mkEnvios(enviosConfRaw);
+  const enviosPend = mkEnvios(enviosPendRaw);
+  const pagosOrdenados = [...(pagos || [])].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
+  const ahora = Date.now();
+  const detalle = [];
+
+  const cubrir = (envios, monto, fechaRef, deadline) => {
+    let cubierto = 0, primerEnvio = null;
+    for (const e of envios) {
+      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
+      const aplicar = Math.min(monto - cubierto, e.disponible);
+      e.disponible -= aplicar;
+      cubierto += aplicar;
+      if (!primerEnvio) primerEnvio = e.fecha;
+      if (cubierto >= monto) break;
+    }
+    return { cubierto, primerEnvio };
+  };
+  // Primer envío (por fecha) a partir del pago, sin importar si le quedó saldo:
+  // sirve para mostrar cuánto TARDÓ el envío aunque no haya cubierto este pago.
+  const primerEnvioDesde = (envios, fechaRef) => { const e = envios.find(e => e.fecha >= fechaRef); return e ? e.fecha : null; };
+
+  pagosOrdenados.forEach(p => {
+    const monto = Number(p.monto);
+    const fechaRef = new Date(p.created_at);
+    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
+    const excepcion = !!p.comision_excepcion;
+    const base = { id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null,
+      excepcion, excepcionNota: p.comision_excepcion_nota||null, excepcionAt: p.comision_excepcion_at||null };
+    // La excepción otorga el 0,1% sobre el TOTAL del pago aunque el envío no califique.
+    const push = item => {
+      let envioAt = item.envioAt || primerEnvioDesde(enviosConf, fechaRef) || primerEnvioDesde(enviosPend, fechaRef);
+      const demoraHs = envioAt ? (envioAt - fechaRef) / 3600000 : null;
+      const vencida = ahora > deadline.getTime();
+      let comisionPerdida = (vencida && !excepcion && (item.estado === 'vencido' || item.estado === 'parcial')) ? (monto - item.montoCubierto) * 0.001 : 0;
+      if (excepcion) item.comision = monto * 0.001;
+      detalle.push({ ...base, ...item, envioAt, demoraHs, comisionPerdida });
+    };
+
+    // 1. Cobertura por envíos CONFIRMADOS (cobertura parcial permitida)
+    const cc = cubrir(enviosConf, monto, fechaRef, deadline);
+    if (cc.cubierto > 0) {
+      const esFull = cc.cubierto >= monto - 0.001;
+      push({ montoCubierto: cc.cubierto, califica: esFull, comision: cc.cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', envioAt: cc.primerEnvio,
+        motivo: esFull ? '' : 'Los envíos de las 24 hs solo cubrieron USD ' + fmt(cc.cubierto) + ' de USD ' + fmt(monto) + '; el resto quedó sin cobertura.' });
+      return;
+    }
+
+    // 2. Sin cobertura confirmada — verificar envíos PENDIENTES (sin confirmar)
+    const cp = cubrir(enviosPend, monto, fechaRef, deadline);
+    if (cp.cubierto > 0) {
+      push({ montoCubierto: 0, califica: false, comision: 0, estado: 'sin_confirmar', envioAt: cp.primerEnvio,
+        motivo: 'Hay un envío dentro de las 24 hs, pero la empresa todavía no lo confirmó.' });
+      return;
+    }
+
+    // 3. Sin cobertura — ¿venció la ventana? Explicar por qué no califica.
+    if (ahora <= deadline.getTime()) {
+      push({ montoCubierto: 0, califica: false, comision: 0, estado: 'pendiente',
+        motivo: 'Dentro de la ventana de 24 hs — todavía puede calificar si llega un envío.' });
+      return;
+    }
+    const huboEnVentana = enviosConf.some(e => e.fecha >= fechaRef && e.fecha <= deadline);
+    const envioTarde = enviosConf.find(e => e.fecha > deadline);
+    let motivo;
+    if (huboEnVentana) motivo = 'Hubo envíos en las 24 hs, pero el FIFO los aplicó a pagos anteriores y no quedó saldo para este.';
+    else if (envioTarde) motivo = 'El primer envío llegó ' + Math.round((envioTarde.fecha - fechaRef) / 3600000) + ' hs después del pago (límite: 24 hs).';
+    else motivo = 'No hubo ningún envío a la empresa después de este pago en el período.';
+    push({ montoCubierto: 0, califica: false, comision: 0, estado: 'vencido', motivo });
+  });
+  return detalle;
+}
+
+// Formatea una demora en horas de forma legible ("18 hs", "52 hs (2,2 días)")
+function fmtDemora(hs) {
+  if (hs == null) return 'sin envío posterior';
+  const h = Math.round(hs);
+  return h > 48 ? h + ' hs (' + fmtDec(hs / 24, 1) + ' días)' : h + ' hs';
+}
+
 // ── EMPRESA: COMISION INTERMEDIARIO ──
 async function renderComisionEmpresa(year, month) {
   const now = new Date();
@@ -2191,40 +2299,21 @@ async function renderComisionEmpresa(year, month) {
   // el rango de búsqueda de envíos +24hs más allá del cierre del mes.
   const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
 
-  const [pagRes, envRes, pagosComRes] = await Promise.all([
-    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+  const [pagRes, envRes, envPendResEmp, pagosComRes] = await Promise.all([
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, comision_excepcion, comision_excepcion_nota, comision_excepcion_at, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, confirmado, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
+    db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
   const pagos = pagRes.data || [];
-  const envios = envRes.data || [];
   const pagosCom = pagosComRes.data || [];
 
-  // FIFO + 24hs con cobertura parcial: mismo algoritmo que la vista del intermediario
-  const enviosConf = (envios || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
-
-  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  let items = [];
-  pagosOrdenados.forEach(p => {
-    const monto = Number(p.monto);
-    const fechaRef = new Date(p.created_at);
-    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-    let cubierto = 0;
-    for (const e of enviosConf) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubierto, e.disponible);
-      e.disponible -= aplicar;
-      cubierto += aplicar;
-      if (cubierto >= monto) break;
-    }
-    if (cubierto > 0) {
-      const esFull = cubierto >= monto - 0.001;
-      items.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null });
-    }
-  });
+  // Cobertura FIFO 24 hs — algoritmo compartido con la vista del intermediario
+  const detalle = calcularCoberturaPagos(pagos, envRes.data, envPendResEmp.data);
+  const items = detalle.filter(i => i.comision > 0);
+  const sinComision = detalle.filter(i => i.comision <= 0);
+  window.__ceYM = { year: year, month: month }; // para re-render tras otorgar/quitar excepción
 
   const totalComision = items.reduce((s,i) => s + i.comision, 0);
   const totalPagado = pagosCom.filter(p => {
@@ -2252,24 +2341,35 @@ async function renderComisionEmpresa(year, month) {
     '<div class="metric"><div class="metric-label">Saldo a pagar</div><div class="metric-value ' + (saldoComision > 0 ? 'danger' : '') + '">USD ' + fmtDec(saldoComision, 2) + '</div><div class="metric-sub">pendiente</div></div>' +
     '</div>';
 
-  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos con cobertura este mes</div><button class="btn btn-sm" id="btn-export-comision-empresa">Exportar Excel</button></div>';
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos con comisión este mes</div><button class="btn btn-sm" id="btn-export-comision-empresa">Exportar Excel</button></div>';
   if (items.length === 0) {
-    html += '<div class="empty-state">Sin pagos cubiertos este mes.</div>';
+    html += '<div class="empty-state">Sin pagos con comisión este mes.</div>';
   } else {
     items.forEach(function(item, i) {
-      const badge = item.califica
-        ? '<span class="badge badge-released">Comisión: USD ' + fmtDec(item.comision, 2) + '</span>'
-        : '<span class="badge badge-pending">Parcial: USD ' + fmtDec(item.comision, 2) + '</span>';
-      const coberturaDesc = item.califica
-        ? 'Cubierto totalmente (USD ' + fmt(item.monto) + '). Comisión: USD ' + fmtDec(item.comision, 2) + '.'
-        : 'Cubierto parcialmente: USD ' + fmt(item.montoCubierto) + ' de USD ' + fmt(item.monto) + '. Comisión parcial: USD ' + fmtDec(item.comision, 2) + '.';
+      const badge = item.excepcion
+        ? '<span class="badge badge-confirmed">Excepción: USD ' + fmtDec(item.comision, 2) + '</span>'
+        : item.califica
+          ? '<span class="badge badge-released">Comisión: USD ' + fmtDec(item.comision, 2) + '</span>'
+          : '<span class="badge badge-pending">Parcial: USD ' + fmtDec(item.comision, 2) + '</span>';
+      const coberturaDesc = item.excepcion
+        ? 'Comisión otorgada POR EXCEPCIÓN' + (item.excepcionAt ? ' el ' + new Date(item.excepcionAt).toLocaleDateString('es-AR') : '') + (item.excepcionNota ? ' ("' + esc(item.excepcionNota) + '")' : '') + '. ' + (item.motivo ? item.motivo + ' ' : '') + 'Comisión sobre USD ' + fmt(item.monto) + ': USD ' + fmtDec(item.comision, 2) + '.'
+        : item.califica
+          ? 'Cubierto totalmente (USD ' + fmt(item.monto) + '). Comisión: USD ' + fmtDec(item.comision, 2) + '.'
+          : 'Cubierto parcialmente: USD ' + fmt(item.montoCubierto) + ' de USD ' + fmt(item.monto) + '. Comisión parcial: USD ' + fmtDec(item.comision, 2) + '.';
+      const accionesExc = item.excepcion
+        ? '<div style="grid-column:1/-1"><button class="btn btn-sm" onclick="quitarExcepcionComision(\'' + item.id + '\')">✕ Quitar excepción</button></div>'
+        : (!item.califica && item.estado === 'parcial'
+          ? '<div style="grid-column:1/-1"><button class="btn btn-sm" onclick="darExcepcionComision(\'' + item.id + '\', ' + item.monto + ')">✓ Completar comisión por excepción (USD ' + fmtDec(item.monto * 0.001, 2) + ' total)</button></div>'
+          : '');
       const detailRows =
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(item.forma_pago || '—') + '</div>' +
         '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (item.confirmado_at ? new Date(item.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Demora del envío</span><br/><span style="color:' + (item.demoraHs != null && item.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + fmtDemora(item.demoraHs) + '</span> <span style="color:var(--text3)">(límite 24 hs)</span></div>' +
         '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(item.referencia || '—') + '</div>' +
         (item.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + safeUrl(item.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
         '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + coberturaDesc + '</div>' +
+        accionesExc +
         '</div>';
       html += '<div>' +
         '<div class="pago-row" style="cursor:pointer" onclick="toggleComisionDetail(\'emp-det-' + i + '\')">' +
@@ -2284,6 +2384,28 @@ async function renderComisionEmpresa(year, month) {
     });
   }
   html += '</div>';
+
+  // Pagos SIN comisión del mes, con el motivo: para decidir excepciones (pagarla igual)
+  if (sinComision.length > 0) {
+    const totalSin = sinComision.reduce((s,i) => s + i.monto, 0);
+    html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos sin comisión este mes</div>' +
+      '<span class="badge badge-late">' + sinComision.length + ' pago' + (sinComision.length!==1?'s':'') + ' · USD ' + fmt(totalSin) + '</span></div>';
+    sinComision.forEach(function(item) {
+      const badge = item.estado === 'sin_confirmar'
+        ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+        : item.estado === 'pendiente'
+          ? '<span class="badge badge-pending">En ventana</span>'
+          : '<span class="badge badge-late">No califica</span>';
+      const demoraTxt = '<span style="color:' + (item.demoraHs != null && item.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + ';font-weight:600">tardó ' + fmtDemora(item.demoraHs) + '</span>';
+      const btnExc = (item.estado === 'vencido' || item.estado === 'sin_confirmar')
+        ? '<button class="btn btn-sm" style="margin-left:8px;white-space:nowrap" onclick="darExcepcionComision(\'' + item.id + '\', ' + item.monto + ')">✓ Dar x excepción</button>'
+        : '';
+      html += '<div class="pago-row"><div class="pago-info"><div class="pago-name">' + esc(item.cliente) + '</div>' +
+        '<div class="pago-sub">' + new Date(item.fecha).toLocaleString('es-AR') + ' · ' + demoraTxt + ' · ' + esc(item.motivo || '') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(item.monto) + '</div>' + badge + btnExc + '</div>';
+    });
+    html += '<div style="padding:10px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">"Dar x excepción" otorga el 0,1% del pago aunque el envío no haya calificado (todos juntos serían USD ' + fmtDec(totalSin * 0.001, 2) + '). La comisión entra al saldo a pagar del mes y el intermediario la ve como "Excepción". Se puede quitar después desde el detalle del pago.</div></div>';
+  }
 
   html += '<div class="card"><div class="card-header"><div class="card-title">Registrar pago de comision</div></div><div class="form-pad">' +
     '<div style="background:var(--surface2);border-radius:var(--radius-sm);padding:12px;margin-bottom:16px;font-size:13px">' +
@@ -2315,16 +2437,17 @@ async function renderComisionEmpresa(year, month) {
   if (btnExpEmp) {
     btnExpEmp.onclick = function() {
       const rows = [['REPORTE DE COMISIÓN — ' + mesLabel.toUpperCase()], []];
-      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Forma de pago', 'Referencia', 'Estado', 'Comisión USD']);
+      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Demora envio hs', 'Forma de pago', 'Referencia', 'Estado', 'Comisión USD']);
       items.forEach(function(item) {
         rows.push([
           item.cliente,
           new Date(item.fecha).toLocaleString('es-AR'),
           item.monto,
           item.montoCubierto,
+          item.demoraHs != null ? Math.round(item.demoraHs) : '',
           item.forma_pago || '',
           item.referencia || '',
-          item.califica ? 'Califica' : 'Parcial',
+          item.excepcion ? 'Excepcion' : item.califica ? 'Califica' : 'Parcial',
           parseFloat((item.comision || 0).toFixed(2))
         ]);
       });
@@ -2396,12 +2519,17 @@ async function renderCliHome() {
   const facturas = facturasRes.data || [];
   const saldoTotal = facturas.reduce((s, f) => s + Number(f.saldo || 0), 0);
   const totalVencido = facturas.filter(f => f.dias_vencidos <= 0).reduce((s, f) => s + Number(f.saldo || 0), 0);
+  const totalInteres = facturas.reduce((s, f) => s + interesMora(f.saldo, f.dias_vencidos), 0);
+  const deudaTotal = saldoTotal + totalInteres;
   const ultimaSync = facturas[0]?.synced_at;
 
   const saldoMetric = facturas.length > 0
     ? '<div class="metric"><div class="metric-label">Saldo pendiente</div>' +
       '<div class="metric-value ' + (saldoTotal > 0 ? 'danger' : 'ok') + '">USD ' + fmt(saldoTotal) + '</div>' +
-      '<div class="metric-sub">' + (ultimaSync ? 'Al ' + new Date(ultimaSync).toLocaleDateString('es-AR') : 'Open Orange') + '</div></div>'
+      (totalInteres > 0
+        ? '<div class="metric-sub" style="color:var(--amber);font-weight:600">+ USD ' + fmt(totalInteres) + ' interés (4%/mes) · total USD ' + fmt(deudaTotal) + '</div>'
+        : '<div class="metric-sub">' + (ultimaSync ? 'Al ' + new Date(ultimaSync).toLocaleDateString('es-AR') : 'Open Orange') + '</div>') +
+      '</div>'
     : '';
 
   const c = document.getElementById('main-content');
@@ -2440,7 +2568,7 @@ async function renderCliHome() {
   // ── Card de facturas pendientes (prolijo y espacioso) ──
   html += '<div class="card" style="margin-top:16px">';
   html += '<div class="card-header" style="padding:18px 20px"><div class="card-title" style="font-size:15px">Mis facturas pendientes' + (facturas.length > 0 ? ' <span style="color:var(--text3);font-weight:400">(' + facturas.length + ')</span>' : '') + '</div>';
-  if (totalVencido > 0) html += '<span class="badge badge-late" style="font-size:12px;padding:5px 10px">USD ' + fmt(totalVencido) + ' vencido</span>';
+  if (totalVencido > 0) html += '<span class="badge badge-late" style="font-size:12px;padding:5px 10px">USD ' + fmt(totalVencido) + ' vencido' + (totalInteres > 0 ? ' + ' + fmt(totalInteres) + ' int.' : '') + '</span>';
   html += '</div>';
 
   if (facturas.length === 0) {
@@ -2456,6 +2584,7 @@ async function renderCliHome() {
       '<th style="text-align:left;padding:12px 8px;font-weight:600">Vencimiento</th>' +
       '<th style="text-align:right;padding:12px 16px;font-weight:600">Total</th>' +
       '<th style="text-align:right;padding:12px 16px;font-weight:600">Saldo</th>' +
+      '<th style="text-align:right;padding:12px 16px;font-weight:600">Interés (4%/mes)</th>' +
       '<th style="text-align:right;padding:12px 20px;font-weight:600">Estado</th>' +
       '</tr></thead><tbody>';
     facturas.forEach(function(f) {
@@ -2474,10 +2603,16 @@ async function renderCliHome() {
         '<td style="padding:14px 8px;color:' + (vencido ? 'var(--red)' : 'var(--text2)') + ';font-weight:' + (vencido ? '600' : '400') + '">' + fVto + '</td>' +
         '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;color:var(--text2)">USD ' + fmt(f.total || 0) + '</td>' +
         '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(f.saldo || 0) + '</td>' +
+        '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">' + (interesMora(f.saldo, f.dias_vencidos) > 0 ? 'USD ' + fmt(interesMora(f.saldo, f.dias_vencidos)) : '—') + '</td>' +
         '<td style="padding:14px 20px;text-align:right;font-family:\'DM Mono\',monospace;font-size:12px;' + (vencido ? 'color:var(--red);font-weight:700' : 'color:var(--green);font-weight:600') + '">' + diasLabel + '</td>' +
         '</tr>';
     });
-    html += '</tbody></table></div>';
+    html += '</tbody><tfoot><tr style="border-top:2px solid var(--border)">' +
+      '<td colspan="5" style="padding:14px 16px;text-align:right;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:600">Totales</td>' +
+      '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--red)">USD ' + fmt(saldoTotal) + '</td>' +
+      '<td style="padding:14px 16px;text-align:right;font-family:\'DM Mono\',monospace;font-weight:700;color:var(--amber)">USD ' + fmt(totalInteres) + '</td>' +
+      '<td style="padding:14px 20px"></td>' +
+      '</tr></tfoot></table></div>';
     if (ultimaSync) {
       html += '<div style="padding:12px 20px;font-size:11px;color:var(--text3);border-top:1px solid var(--border)">Al ' + new Date(ultimaSync).toLocaleDateString('es-AR') + ' · Sincronizado desde Open Orange</div>';
     }
@@ -2520,71 +2655,30 @@ async function renderIntComision(year, month) {
   // el rango de búsqueda de envíos +24hs más allá del cierre del mes.
   const ultimoDiaMas24h = new Date(new Date(year, month + 1, 0, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
 
-  const [pagRes, envConfRes, envPendRes] = await Promise.all([
-    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
+  const [pagRes, envConfRes, envPendRes, comPagRes] = await Promise.all([
+    db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, comision_excepcion, comision_excepcion_nota, comision_excepcion_at, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', primerDia).lte('created_at', ultimoDia).order('created_at', { ascending: true }),
     db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
     db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', primerDia).lte('created_at', ultimoDiaMas24h),
+    db.from('comision_pagos').select('*').order('created_at', { ascending: false }),
   ]);
 
   const pagos = pagRes.data || [];
 
-  // FIFO + 24hs sobre envíos confirmados
-  const enviosConf = (envConfRes.data || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
+  // Cobertura FIFO 24 hs — algoritmo compartido (calcularCoberturaPagos)
+  const detalleComision = calcularCoberturaPagos(pagos, envConfRes.data, envPendRes.data);
+  const totalComisionBase = detalleComision.reduce((s, d) => s + d.montoCubierto, 0);
+  const comisionTotal = detalleComision.reduce((s, d) => s + d.comision, 0); // incluye excepciones otorgadas
+  const perdidaMes = detalleComision.reduce((s, d) => s + d.comisionPerdida, 0);
 
-  // Envíos sin confirmar (para mostrar estado intermedio)
-  const enviosPend = (envPendRes.data || [])
-    .sort((a,b) => new Date(a.created_at) - new Date(b.created_at))
-    .map(e => ({ fecha: new Date(e.created_at), disponible: Number(e.monto_total) }));
-
-  const pagosOrdenados = [...pagos].sort((a,b) => new Date(a.created_at) - new Date(b.created_at));
-  const ahora = Date.now();
-  let totalComisionBase = 0; // suma de montos cubiertos (total o parcialmente)
-  let detalleComision = [];
-
-  pagosOrdenados.forEach(p => {
-    const monto = Number(p.monto);
-    const fechaRef = new Date(p.created_at);
-    const deadline = new Date(fechaRef.getTime() + 24 * 3600000);
-    const extra = { forma_pago: p.forma_pago||null, referencia: p.referencia||null, comprobante_url: p.comprobante_url||null, confirmado_at: p.confirmado_at||null };
-
-    // 1. Cobertura por envíos CONFIRMADOS (cobertura parcial permitida)
-    let cubierto = 0;
-    for (const e of enviosConf) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubierto, e.disponible);
-      e.disponible -= aplicar;
-      cubierto += aplicar;
-      if (cubierto >= monto) break;
-    }
-    if (cubierto > 0) {
-      const esFull = cubierto >= monto - 0.001;
-      totalComisionBase += cubierto;
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: cubierto, califica: esFull, comision: cubierto * 0.001, estado: esFull ? 'califica' : 'parcial', ...extra });
-      return;
-    }
-
-    // 2. Sin cobertura confirmada — verificar envíos PENDIENTES (sin confirmar)
-    let cubiertoPend = 0;
-    for (const e of enviosPend) {
-      if (e.fecha < fechaRef || e.fecha > deadline || e.disponible <= 0) continue;
-      const aplicar = Math.min(monto - cubiertoPend, e.disponible);
-      e.disponible -= aplicar;
-      cubiertoPend += aplicar;
-      if (cubiertoPend >= monto) break;
-    }
-    if (cubiertoPend > 0) {
-      detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: 'sin_confirmar', ...extra });
-      return;
-    }
-
-    // 3. Sin cobertura — ¿venció la ventana?
-    const vencio = ahora > deadline.getTime();
-    detalleComision.push({ id: p.id, cliente: p.profiles?.nombre||'-', fecha: p.created_at, monto, montoCubierto: 0, califica: false, comision: 0, estado: vencio ? 'vencido' : 'pendiente', ...extra });
+  // Pagos de comisión que la empresa le hizo al intermediario este mes (por fecha_pago)
+  // + saldo pendiente del mes. Mismo criterio que la vista Comisión de la empresa.
+  const pagosComisionMes = (comPagRes.data || []).filter(p => {
+    const f = p.fecha_pago ? new Date(p.fecha_pago + 'T12:00:00') : new Date(p.created_at);
+    return f >= new Date(year, month, 1) && f <= new Date(year, month + 1, 0, 23, 59, 59);
   });
+  const totalPagadoMes = pagosComisionMes.reduce((s, p) => s + Number(p.monto), 0);
+  const saldoComisionMes = comisionTotal - totalPagadoMes;
 
-  const comisionTotal = totalComisionBase * 0.001;
   const isMesActualInt = year === now.getFullYear() && month === now.getMonth();
   const c = document.getElementById('main-content');
   c.innerHTML =
@@ -2594,36 +2688,53 @@ async function renderIntComision(year, month) {
     '<button class="btn btn-sm" id="btn-int-mes-next"' + (isMesActualInt ? ' disabled' : '') + '>Siguiente →</button>' +
     '</div>' +
     '<div class="metrics" style="margin-bottom:20px">' +
-    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + '</div></div>' +
-    '<div class="metric"><div class="metric-label">Monto cubierto</div><div class="metric-value">USD ' + fmt(totalComisionBase) + '</div><div class="metric-sub">total o parcialmente enviado</div></div>' +
-    '<div class="metric"><div class="metric-label">Tasa aplicada</div><div class="metric-value" style="font-size:16px">0,1%</div><div class="metric-sub">por monto cubierto</div></div>' +
+    '<div class="metric"><div class="metric-label">Comision del mes</div><div class="metric-value ok">USD ' + fmtDec(comisionTotal, 2) + '</div><div class="metric-sub">' + mesLabel + ' · 0,1% sobre USD ' + fmt(totalComisionBase) + ' cubierto + excepciones</div></div>' +
+    '<div class="metric"><div class="metric-label">Ya cobrado</div><div class="metric-value">USD ' + fmtDec(totalPagadoMes, 2) + '</div><div class="metric-sub">pagos de comisión recibidos este mes</div></div>' +
+    '<div class="metric"><div class="metric-label">Saldo a favor</div><div class="metric-value ' + (saldoComisionMes > 0.005 ? 'danger' : 'ok') + '">USD ' + fmtDec(Math.max(saldoComisionMes, 0), 2) + '</div><div class="metric-sub">' + (saldoComisionMes > 0.005 ? 'pendiente de cobro' : 'al día') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Perdida por demora</div><div class="metric-value ' + (perdidaMes > 0.005 ? 'danger' : 'ok') + '">USD ' + fmtDec(perdidaMes, 2) + '</div><div class="metric-sub">' + (perdidaMes > 0.005 ? 'dejaste de ganar por enviar fuera de las 24 hs' : 'nada perdido este mes') + '</div></div>' +
     '</div>' +
+    (pagosComisionMes.length > 0
+      ? '<div class="card section-gap"><div class="card-header"><div class="card-title">Pagos de comisión recibidos</div></div>' +
+        pagosComisionMes.map(p =>
+          '<div class="data-row"><span class="data-label">' +
+          (p.fecha_pago ? new Date(p.fecha_pago + 'T12:00:00') : new Date(p.created_at)).toLocaleDateString('es-AR') +
+          (p.notas ? ' · ' + esc(p.notas) : '') +
+          '</span><span class="data-value ok">USD ' + fmtDec(Number(p.monto), 2) + '</span></div>'
+        ).join('') +
+        '</div>'
+      : '') +
     '<div class="card"><div class="card-header"><div class="card-title">Detalle por pago</div><button class="btn btn-sm" id="btn-export-comision">Exportar Excel</button></div>' +
     (detalleComision.length === 0 ? '<div class="empty-state">Sin pagos este mes.</div>' :
       detalleComision.map((d, i) => {
-        const badge = d.califica
-          ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
-          : d.estado === 'parcial'
-            ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
-            : d.estado === 'sin_confirmar'
-              ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
-              : d.estado === 'vencido'
-                ? '<span class="badge badge-late">No califica</span>'
-                : '<span class="badge badge-pending">Pendiente</span>';
+        const badge = d.excepcion
+          ? '<span class="badge badge-released">Excepción · USD ' + fmtDec(d.comision, 2) + '</span>'
+          : d.califica
+            ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
+            : d.estado === 'parcial'
+              ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+              : d.estado === 'sin_confirmar'
+                ? '<span class="badge badge-confirmed" style="background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE">Enviado · sin confirmar</span>'
+                : d.estado === 'vencido'
+                  ? '<span class="badge badge-late">No califica</span>'
+                  : '<span class="badge badge-pending">Pendiente</span>';
         const deadline24 = new Date(new Date(d.fecha).getTime() + 24*3600000);
-        const estadoDesc = d.califica
-          ? 'Envío confirmado por la empresa dentro de las 24 hs. Comisión sobre USD ' + fmt(d.monto) + ': USD ' + fmtDec(d.comision, 2) + '.'
-          : d.estado === 'parcial'
-            ? 'Se cubrió USD ' + fmt(d.montoCubierto) + ' de los USD ' + fmt(d.monto) + ' informados dentro de las 24 hs. Comisión parcial: USD ' + fmtDec(d.comision, 2) + '. Los USD ' + fmt(d.monto - d.montoCubierto) + ' restantes no tuvieron cobertura.'
-            : d.estado === 'sin_confirmar'
-              ? 'El intermediario registró un envío dentro de las 24 hs, pero la empresa aún no lo confirmó. La comisión quedará pendiente hasta la confirmación.'
-              : d.estado === 'vencido'
-                ? 'No se registró ningún envío dentro de las 24 hs desde que el cliente informó el pago. No califica para comisión.'
-                : 'Ventana de 24 hs abierta hasta ' + deadline24.toLocaleString('es-AR') + '. Aún puede calificar.';
+        const estadoDesc = d.excepcion
+          ? 'La empresa te otorgó la comisión POR EXCEPCIÓN' + (d.excepcionAt ? ' el ' + new Date(d.excepcionAt).toLocaleDateString('es-AR') : '') + (d.excepcionNota ? ' ("' + esc(d.excepcionNota) + '")' : '') + ', aunque el envío no calificó. Comisión sobre USD ' + fmt(d.monto) + ': USD ' + fmtDec(d.comision, 2) + '.'
+          : d.califica
+            ? 'Envío confirmado por la empresa dentro de las 24 hs. Comisión sobre USD ' + fmt(d.monto) + ': USD ' + fmtDec(d.comision, 2) + '.'
+            : d.estado === 'parcial'
+              ? 'Se cubrió USD ' + fmt(d.montoCubierto) + ' de los USD ' + fmt(d.monto) + ' informados dentro de las 24 hs. Comisión parcial: USD ' + fmtDec(d.comision, 2) + '. Los USD ' + fmt(d.monto - d.montoCubierto) + ' restantes no tuvieron cobertura.'
+              : d.estado === 'sin_confirmar'
+                ? 'El intermediario registró un envío dentro de las 24 hs, pero la empresa aún no lo confirmó. La comisión quedará pendiente hasta la confirmación.'
+                : d.estado === 'vencido'
+                  ? (d.motivo || 'No se registró ningún envío dentro de las 24 hs desde que el cliente informó el pago.') + ' No califica para comisión.'
+                  : 'Ventana de 24 hs abierta hasta ' + deadline24.toLocaleString('es-AR') + '. Aún puede calificar.';
         const detailRows =
           '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
           '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Forma de pago</span><br/>' + esc(d.forma_pago || '—') + '</div>' +
           '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Confirmado por intermediario</span><br/>' + (d.confirmado_at ? new Date(d.confirmado_at).toLocaleString('es-AR') : '—') + '</div>' +
+          '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Tu envío tardó</span><br/><span style="color:' + (d.demoraHs != null && d.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + fmtDemora(d.demoraHs) + '</span> <span style="color:var(--text3)">(límite 24 hs)</span></div>' +
+          '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Comisión perdida</span><br/>' + (d.comisionPerdida > 0.005 ? '<span style="color:var(--red);font-weight:600">USD ' + fmtDec(d.comisionPerdida, 2) + '</span>' : '<span style="color:var(--green)">—</span>') + '</div>' +
           '<div style="grid-column:1/-1"><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Referencia</span><br/>' + esc(d.referencia || '—') + '</div>' +
           (d.comprobante_url ? '<div style="grid-column:1/-1"><a href="' + safeUrl(d.comprobante_url) + '" target="_blank" rel="noopener noreferrer" style="color:var(--blue);font-size:12px;text-decoration:none">📎 Ver comprobante adjunto →</a></div>' : '') +
           '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + estadoDesc + '</div>' +
@@ -2646,25 +2757,27 @@ async function renderIntComision(year, month) {
   if (btnExp) {
     btnExp.onclick = function() {
       const rows = [['REPORTE DE COMISION - ' + mesLabel.toUpperCase()], []];
-      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Forma de pago', 'Referencia', 'Estado', 'Comision USD']);
+      rows.push(['Cliente', 'Fecha informado', 'Monto USD', 'Monto cubierto USD', 'Demora envio hs', 'Forma de pago', 'Referencia', 'Estado', 'Comision USD', 'Perdida USD']);
       detalleComision.forEach(function(d) {
-        const estadoLabel = d.califica ? 'Califica' : d.estado === 'parcial' ? 'Parcial' : d.estado === 'sin_confirmar' ? 'Enviado sin confirmar' : d.estado === 'vencido' ? 'No califica' : 'Pendiente';
+        const estadoLabel = d.excepcion ? 'Excepcion' : d.califica ? 'Califica' : d.estado === 'parcial' ? 'Parcial' : d.estado === 'sin_confirmar' ? 'Enviado sin confirmar' : d.estado === 'vencido' ? 'No califica' : 'Pendiente';
         rows.push([
           d.cliente,
           new Date(d.fecha).toLocaleString('es-AR'),
           d.monto,
           d.montoCubierto || 0,
+          d.demoraHs != null ? Math.round(d.demoraHs) : '',
           d.forma_pago || '',
           d.referencia || '',
           estadoLabel,
-          parseFloat((d.comision||0).toFixed(2))
+          parseFloat((d.comision||0).toFixed(2)),
+          parseFloat((d.comisionPerdida||0).toFixed(2))
         ]);
       });
       rows.push([]);
-      rows.push(['TOTAL CUBIERTO', totalComisionBase, '', '', '', '', 'COMISION TOTAL', parseFloat(comisionTotal.toFixed(2))]);
+      rows.push(['TOTAL CUBIERTO', totalComisionBase, '', '', '', '', '', 'COMISION TOTAL', parseFloat(comisionTotal.toFixed(2)), parseFloat(perdidaMes.toFixed(2))]);
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:24},{wch:22},{wch:10},{wch:14}];
+      ws['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:16},{wch:14},{wch:24},{wch:22},{wch:12},{wch:14},{wch:12}];
       XLSX.utils.book_append_sheet(wb, ws, 'Comision');
       XLSX.writeFile(wb, 'comision_' + mesLabel.replace(/\s+/g,'_') + '.xlsx');
     };
@@ -2681,6 +2794,303 @@ async function renderIntComision(year, month) {
     let y = year, m = month + 1;
     if (m > 11) { m = 0; y++; }
     renderIntComision(y, m);
+  };
+}
+
+// ── EXCEPCIONES DE COMISIÓN (empresa otorga/quita, pago por pago) ───────────
+window.darExcepcionComision = async function(id, monto) {
+  const nota = prompt('Otorgar la comisión POR EXCEPCIÓN: USD ' + fmtDec(monto * 0.001, 2) + ' (0,1% de USD ' + fmt(monto) + ') aunque el envío no calificó.\n\nNota opcional (la ve el intermediario):', '');
+  if (nota === null) return; // canceló el prompt
+  const { error } = await db.from('pagos_cliente').update({
+    comision_excepcion: true,
+    comision_excepcion_nota: (nota || '').trim() || null,
+    comision_excepcion_at: new Date().toISOString(),
+  }).eq('id', id);
+  if (error) { alert('No se pudo otorgar la excepción: ' + error.message); return; }
+  const ym = window.__ceYM || {};
+  renderComisionEmpresa(ym.year, ym.month);
+};
+window.quitarExcepcionComision = async function(id) {
+  if (!confirm('¿Quitar la excepción? La comisión de este pago deja de contar.')) return;
+  const { error } = await db.from('pagos_cliente').update({
+    comision_excepcion: false,
+    comision_excepcion_nota: null,
+    comision_excepcion_at: null,
+  }).eq('id', id);
+  if (error) { alert('No se pudo quitar la excepción: ' + error.message); return; }
+  const ym = window.__ceYM || {};
+  renderComisionEmpresa(ym.year, ym.month);
+};
+
+// ── INTERMEDIARIO: REPORTES (anual) ─────────────────────────────────────────
+async function renderIntReportes(year) {
+  const now = new Date();
+  if (year === undefined) year = now.getFullYear();
+  const desde = new Date(year, 0, 1).toISOString();
+  const hasta = new Date(year, 11, 31, 23, 59, 59).toISOString();
+  const hastaMas24h = new Date(new Date(year, 11, 31, 23, 59, 59).getTime() + 24 * 3600000).toISOString();
+
+  // PostgREST corta en 1000 filas por request: paginamos con range()
+  async function fetchAll(mkQuery) {
+    const page = 1000; let all = []; let from = 0;
+    while (true) {
+      const { data } = await mkQuery().range(from, from + page - 1);
+      all = all.concat(data || []);
+      if (!data || data.length < page) break;
+      from += page;
+    }
+    return all;
+  }
+
+  const [pagos, enviosConf, enviosPend, comPagos] = await Promise.all([
+    fetchAll(() => db.from('pagos_cliente').select('id, monto, created_at, confirmado_at, forma_pago, referencia, comprobante_url, comision_excepcion, comision_excepcion_nota, comision_excepcion_at, profiles!pagos_cliente_cliente_profile_id_fkey(nombre)').eq('estado','confirmado').gte('created_at', desde).lte('created_at', hasta).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('envios_intermediario').select('monto_total, created_at').eq('confirmado', true).gte('created_at', desde).lte('created_at', hastaMas24h).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('envios_intermediario').select('monto_total, created_at').neq('confirmado', true).gte('created_at', desde).lte('created_at', hastaMas24h).order('created_at', { ascending: true })),
+    fetchAll(() => db.from('comision_pagos').select('*').order('created_at', { ascending: true })),
+  ]);
+
+  const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const ultimoMes = year === now.getFullYear() ? now.getMonth() : 11;
+
+  // Mismo cálculo que "Mi comisión": cada mes corre su propio FIFO, así los números
+  // del reporte coinciden exactamente con la vista mensual.
+  const mensual = []; let detalleAnual = [];
+  for (let m = 0; m <= ultimoMes; m++) {
+    const mIni = new Date(year, m, 1);
+    const mFin = new Date(year, m + 1, 0, 23, 59, 59);
+    const mFin24 = new Date(mFin.getTime() + 24 * 3600000);
+    const enRango = (arr, a, b) => arr.filter(x => { const f = new Date(x.created_at); return f >= a && f <= b; });
+    const detalle = calcularCoberturaPagos(enRango(pagos, mIni, mFin), enRango(enviosConf, mIni, mFin24), enRango(enviosPend, mIni, mFin24));
+    detalle.forEach(d => { d.mes = m; });
+    detalleAnual = detalleAnual.concat(detalle);
+    const volumen = detalle.reduce((s,d) => s + d.monto, 0);
+    const cubierto = detalle.reduce((s,d) => s + d.montoCubierto, 0);
+    const comisionMes = detalle.reduce((s,d) => s + d.comision, 0); // incluye excepciones
+    const perdidaMes = detalle.reduce((s,d) => s + d.comisionPerdida, 0);
+    const cobrado = comPagos.filter(p => {
+      const f = p.fecha_pago ? new Date(p.fecha_pago + 'T12:00:00') : new Date(p.created_at);
+      return f >= mIni && f <= mFin;
+    }).reduce((s,p) => s + Number(p.monto), 0);
+    mensual.push({ mes: m, pagos: detalle.length, volumen, cubierto, comision: comisionMes, perdida: perdidaMes, cobrado });
+  }
+
+  const tot = mensual.reduce((a,r) => ({ pagos: a.pagos + r.pagos, volumen: a.volumen + r.volumen, cubierto: a.cubierto + r.cubierto, comision: a.comision + r.comision, perdida: a.perdida + r.perdida, cobrado: a.cobrado + r.cobrado }), { pagos:0, volumen:0, cubierto:0, comision:0, perdida:0, cobrado:0 });
+  const saldoAnual = tot.comision - tot.cobrado;
+
+  // Por cliente: cantidad de pagos separada en califican / parciales / no califican
+  const porCliente = {};
+  detalleAnual.forEach(d => {
+    const k = d.cliente || '-';
+    if (!porCliente[k]) porCliente[k] = { cliente: k, pagos: 0, monto: 0, calif: 0, parcial: 0, noCalif: 0, noCalifMonto: 0, excepciones: 0, comision: 0, perdida: 0, demoraSum: 0, demoraN: 0, items: [] };
+    const c = porCliente[k];
+    c.pagos++; c.monto += d.monto; c.comision += d.comision; c.perdida += d.comisionPerdida;
+    c.items.push(d);
+    if (d.demoraHs != null) { c.demoraSum += d.demoraHs; c.demoraN++; }
+    if (d.excepcion) c.excepciones++;
+    if (d.estado === 'califica') c.calif++;
+    else if (d.estado === 'parcial') c.parcial++;
+    else { c.noCalif++; c.noCalifMonto += d.monto; }
+  });
+  const clientes = Object.values(porCliente).sort((a,b) => b.monto - a.monto);
+  const noCalifican = detalleAnual.filter(d => d.estado !== 'califica').sort((a,b) => new Date(b.fecha) - new Date(a.fecha));
+
+  const esAnioActual = year === now.getFullYear();
+  const c = document.getElementById('main-content');
+  let html = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">' +
+    '<button class="btn btn-sm" id="btn-rep-prev">← ' + (year - 1) + '</button>' +
+    '<span style="font-size:14px;font-weight:500;min-width:120px;text-align:center">Año ' + year + '</span>' +
+    '<button class="btn btn-sm" id="btn-rep-next"' + (esAnioActual ? ' disabled' : '') + '>' + (year + 1) + ' →</button>' +
+    '</div>';
+
+  html += '<div class="metrics" style="margin-bottom:20px">' +
+    '<div class="metric"><div class="metric-label">Volumen procesado</div><div class="metric-value">USD ' + fmt(tot.volumen) + '</div><div class="metric-sub">' + tot.pagos + ' pago' + (tot.pagos!==1?'s':'') + ' de clientes en ' + year + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Comisión ganada</div><div class="metric-value ok">USD ' + fmtDec(tot.comision, 2) + '</div><div class="metric-sub">0,1% sobre USD ' + fmt(tot.cubierto) + ' cubierto en 24 hs + excepciones</div></div>' +
+    '<div class="metric"><div class="metric-label">Cobrado</div><div class="metric-value">USD ' + fmtDec(tot.cobrado, 2) + '</div><div class="metric-sub">pagos de comisión recibidos</div></div>' +
+    '<div class="metric"><div class="metric-label">Saldo a favor</div><div class="metric-value ' + (saldoAnual > 0.005 ? 'danger' : 'ok') + '">USD ' + fmtDec(Math.max(saldoAnual, 0), 2) + '</div><div class="metric-sub">' + (saldoAnual > 0.005 ? 'pendiente de cobro' : 'al día') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Comisión perdida</div><div class="metric-value ' + (tot.perdida > 0.005 ? 'danger' : 'ok') + '">USD ' + fmtDec(tot.perdida, 2) + '</div><div class="metric-sub">' + (tot.perdida > 0.005 ? 'dejaste de ganar por enviar fuera de las 24 hs' : 'nada perdido en ' + year) + '</div></div>' +
+    '</div>';
+
+  // Gráfico de barras: volumen por mes
+  const maxVol = Math.max.apply(null, mensual.map(r => r.volumen).concat([1]));
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Volumen por mes</div></div>' +
+    '<div style="display:flex;align-items:flex-end;gap:8px;height:150px;padding:20px 20px 6px">' +
+    mensual.map(r =>
+      '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end" title="' + MESES[r.mes] + ': USD ' + fmt(r.volumen) + ' · comisión USD ' + fmtDec(r.comision, 2) + '">' +
+      '<div style="font-size:9px;color:var(--text3);font-family:\'DM Mono\',monospace;white-space:nowrap">' + (r.volumen > 0 ? fmt(r.volumen) : '') + '</div>' +
+      '<div style="width:100%;max-width:42px;background:var(--blue);opacity:.85;border-radius:4px 4px 0 0;height:' + (r.volumen > 0 ? Math.max(r.volumen / maxVol * 100, 2) : 0) + 'px"></div>' +
+      '</div>').join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px;padding:0 20px 14px">' +
+    mensual.map(r => '<div style="flex:1;text-align:center;font-size:10px;color:var(--text3)">' + MESES[r.mes] + '</div>').join('') +
+    '</div></div>';
+
+  // Tabla mensual
+  const tdNum = 'padding:10px 8px;text-align:right;font-family:\'DM Mono\',monospace;font-size:12px';
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Detalle mensual</div><button class="btn btn-sm" id="btn-export-reporte">Exportar Excel</button></div>' +
+    '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">' +
+    '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+    '<th style="text-align:left;padding:10px 20px;font-weight:600">Mes</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Pagos</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Volumen</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Cubierto 24 hs</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Comisión</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Perdida</th>' +
+    '<th style="text-align:right;padding:10px 8px;font-weight:600">Cobrado</th>' +
+    '<th style="text-align:right;padding:10px 20px;font-weight:600">Saldo</th>' +
+    '</tr></thead><tbody>';
+  mensual.forEach(r => {
+    const saldo = r.comision - r.cobrado;
+    html += '<tr style="border-bottom:1px solid var(--border)">' +
+      '<td style="padding:10px 20px;text-transform:capitalize">' + new Date(year, r.mes, 1).toLocaleString('es-AR', { month: 'long' }) + '</td>' +
+      '<td style="' + tdNum + '">' + r.pagos + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmt(r.volumen) + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmt(r.cubierto) + '</td>' +
+      '<td style="' + tdNum + ';color:var(--green);font-weight:600">USD ' + fmtDec(r.comision, 2) + '</td>' +
+      '<td style="' + tdNum + ';color:' + (r.perdida > 0.005 ? 'var(--red)' : 'var(--text3)') + '">' + (r.perdida > 0.005 ? 'USD ' + fmtDec(r.perdida, 2) : '—') + '</td>' +
+      '<td style="' + tdNum + '">USD ' + fmtDec(r.cobrado, 2) + '</td>' +
+      '<td style="' + tdNum.replace('8px','20px') + ';color:' + (saldo > 0.005 ? 'var(--red)' : 'var(--text2)') + '">USD ' + fmtDec(saldo, 2) + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody><tfoot><tr style="border-top:2px solid var(--border);font-weight:700">' +
+    '<td style="padding:10px 20px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text3)">Total ' + year + '</td>' +
+    '<td style="' + tdNum + '">' + tot.pagos + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmt(tot.volumen) + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmt(tot.cubierto) + '</td>' +
+    '<td style="' + tdNum + ';color:var(--green)">USD ' + fmtDec(tot.comision, 2) + '</td>' +
+    '<td style="' + tdNum + ';color:' + (tot.perdida > 0.005 ? 'var(--red)' : 'var(--text3)') + '">USD ' + fmtDec(tot.perdida, 2) + '</td>' +
+    '<td style="' + tdNum + '">USD ' + fmtDec(tot.cobrado, 2) + '</td>' +
+    '<td style="' + tdNum.replace('8px','20px') + ';color:' + (saldoAnual > 0.005 ? 'var(--red)' : 'var(--text2)') + '">USD ' + fmtDec(saldoAnual, 2) + '</td>' +
+    '</tr></tfoot></table></div></div>';
+
+  // Por cliente
+  html += '<div class="card section-gap"><div class="card-header"><div class="card-title">Por cliente</div></div>';
+  if (clientes.length === 0) {
+    html += '<div class="empty-state">Sin pagos en ' + year + '.</div>';
+  } else {
+    html += '<div style="overflow-x:auto"><table style="width:100%;font-size:13px;border-collapse:collapse">' +
+      '<thead><tr style="color:var(--text3);border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.05em">' +
+      '<th style="text-align:left;padding:10px 20px;font-weight:600">Cliente</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Pagos</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Califican</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Parciales</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">No califican</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Prom. envío</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Volumen</th>' +
+      '<th style="text-align:right;padding:10px 8px;font-weight:600">Perdida</th>' +
+      '<th style="text-align:right;padding:10px 20px;font-weight:600">Comisión</th>' +
+      '</tr></thead><tbody>';
+    clientes.forEach((cl, ci) => {
+      const prom = cl.demoraN > 0 ? cl.demoraSum / cl.demoraN : null;
+      html += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="toggleClienteDetail(' + ci + ')">' +
+        '<td style="padding:10px 20px;font-weight:500"><span style="color:var(--text3);font-size:12px;user-select:none;margin-right:6px" id="arr-cli-' + ci + '">›</span>' + esc(cl.cliente) + '</td>' +
+        '<td style="' + tdNum + '">' + cl.pagos + '</td>' +
+        '<td style="' + tdNum + ';color:var(--green)">' + cl.calif + '</td>' +
+        '<td style="' + tdNum + ';color:' + (cl.parcial > 0 ? 'var(--amber)' : 'var(--text3)') + '">' + cl.parcial + '</td>' +
+        '<td style="' + tdNum + ';color:' + (cl.noCalif > 0 ? 'var(--red)' : 'var(--text3)') + '">' + cl.noCalif + (cl.noCalif > 0 ? ' · USD ' + fmt(cl.noCalifMonto) : '') + (cl.excepciones > 0 ? ' <span style="color:var(--blue)">(' + cl.excepciones + ' c/exc.)</span>' : '') + '</td>' +
+        '<td style="' + tdNum + ';font-weight:600;color:' + (prom == null ? 'var(--text3)' : prom <= 24 ? 'var(--green)' : 'var(--red)') + '">' + (prom == null ? '—' : fmtDemora(prom)) + '</td>' +
+        '<td style="' + tdNum + '">USD ' + fmt(cl.monto) + '</td>' +
+        '<td style="' + tdNum + ';color:' + (cl.perdida > 0.005 ? 'var(--red)' : 'var(--text3)') + '">' + (cl.perdida > 0.005 ? 'USD ' + fmtDec(cl.perdida, 2) : '—') + '</td>' +
+        '<td style="' + tdNum.replace('8px','20px') + ';color:var(--green);font-weight:600">USD ' + fmtDec(cl.comision, 2) + '</td>' +
+        '</tr>';
+      // Detalle pago x pago del cliente (fila oculta, se abre al clickear la fila)
+      html += '<tr id="det-cli-' + ci + '" style="display:none"><td colspan="9" style="padding:0;background:var(--surface2);border-bottom:1px solid var(--border)">' +
+        '<div style="padding:10px 20px">' +
+        cl.items.map(d => {
+          const est = d.excepcion
+            ? '<span class="badge badge-confirmed">Excepción · USD ' + fmtDec(d.comision, 2) + '</span>'
+            : d.estado === 'califica'
+              ? '<span class="badge badge-released">Califica · USD ' + fmtDec(d.comision, 2) + '</span>'
+              : d.estado === 'parcial'
+                ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+                : d.estado === 'sin_confirmar'
+                  ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+                  : d.estado === 'pendiente'
+                    ? '<span class="badge badge-pending">En ventana</span>'
+                    : '<span class="badge badge-late">No califica' + (d.comisionPerdida > 0.005 ? ' · −USD ' + fmtDec(d.comisionPerdida, 2) : '') + '</span>';
+          return '<div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px">' +
+            '<span style="color:var(--text2);min-width:130px">' + new Date(d.fecha).toLocaleString('es-AR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) + '</span>' +
+            '<span style="font-family:\'DM Mono\',monospace;font-weight:600;min-width:110px;text-align:right">USD ' + fmt(d.monto) + '</span>' +
+            '<span style="min-width:150px">tardó <span style="font-weight:600;color:' + (d.demoraHs != null && d.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + '">' + fmtDemora(d.demoraHs) + '</span></span>' +
+            est +
+            '</div>';
+        }).join('') +
+        '<div style="padding-top:8px;font-size:11px;color:var(--text3)">Promedio del cliente: ' + (prom == null ? 'sin envíos' : fmtDemora(prom) + ' (límite 24 hs)') + '</div>' +
+        '</div></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  // Pagos que no calificaron (o calificaron parcial), con el motivo
+  const totalNoCalif = noCalifican.reduce((s,d) => s + (d.monto - d.montoCubierto), 0);
+  html += '<div class="card"><div class="card-header"><div class="card-title">Pagos que no calificaron</div>' +
+    (noCalifican.length > 0 ? '<span class="badge badge-late">' + noCalifican.length + ' pago' + (noCalifican.length!==1?'s':'') + ' · USD ' + fmt(totalNoCalif) + ' sin cobertura</span>' : '') +
+    '</div>';
+  if (noCalifican.length === 0) {
+    html += '<div class="empty-state">Todos los pagos de ' + year + ' calificaron. ✓</div>';
+  } else {
+    noCalifican.forEach((d, i) => {
+      const badge = d.excepcion
+        ? '<span class="badge badge-confirmed">Excepción · USD ' + fmtDec(d.comision, 2) + '</span>'
+        : d.estado === 'parcial'
+          ? '<span class="badge badge-pending">Parcial · USD ' + fmtDec(d.comision, 2) + '</span>'
+          : d.estado === 'sin_confirmar'
+            ? '<span class="badge badge-confirmed">Sin confirmar</span>'
+            : d.estado === 'pendiente'
+              ? '<span class="badge badge-pending">En ventana</span>'
+              : '<span class="badge badge-late">No califica</span>';
+      const detailRows =
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:12px;color:var(--text2)">' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Pago informado</span><br/>' + new Date(d.fecha).toLocaleString('es-AR') + '</div>' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Tu envío llegó</span><br/>' + (d.envioAt ? new Date(d.envioAt).toLocaleString('es-AR') : '<span style="color:var(--red)">nunca</span>') + '</div>' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Tardaste</span><br/><span style="color:' + (d.demoraHs != null && d.demoraHs <= 24 ? 'var(--green)' : 'var(--red)') + ';font-weight:600">' + fmtDemora(d.demoraHs) + '</span> <span style="color:var(--text3)">(límite 24 hs)</span></div>' +
+        '<div><span style="color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.06em">Comisión perdida</span><br/>' + (d.comisionPerdida > 0.005 ? '<span style="color:var(--red);font-weight:600">USD ' + fmtDec(d.comisionPerdida, 2) + '</span>' : (d.excepcion ? '<span style="color:var(--green)">recuperada por excepción</span>' : '<span style="color:var(--text3)">—</span>')) + '</div>' +
+        (d.excepcion ? '<div style="grid-column:1/-1;color:var(--blue)">✓ La empresa te otorgó la comisión por excepción' + (d.excepcionAt ? ' el ' + new Date(d.excepcionAt).toLocaleDateString('es-AR') : '') + (d.excepcionNota ? ': "' + esc(d.excepcionNota) + '"' : '') + '</div>' : '') +
+        '<div style="grid-column:1/-1;padding-top:6px;border-top:1px solid var(--border);color:var(--text3)">' + esc(d.motivo || '') + '</div>' +
+        '</div>';
+      html += '<div>' +
+        '<div class="pago-row" style="cursor:pointer" onclick="toggleComisionDetail(\'det-rep-' + i + '\')">' +
+        '<div class="pago-info"><div class="pago-name">' + esc(d.cliente) + '</div>' +
+        '<div class="pago-sub">' + MESES[d.mes] + ' · ' + new Date(d.fecha).toLocaleString('es-AR') + ' · tardó <span style="font-weight:600;color:var(--red)">' + fmtDemora(d.demoraHs) + '</span>' + (d.comisionPerdida > 0.005 ? ' · perdiste USD ' + fmtDec(d.comisionPerdida, 2) : '') + '</div></div>' +
+        '<div class="pago-amount">USD ' + fmt(d.monto) + '</div>' +
+        badge +
+        '<span style="color:var(--text3);font-size:12px;margin-left:4px;user-select:none" id="arr-rep-' + i + '">›</span>' +
+        '</div>' +
+        '<div id="det-rep-' + i + '" style="display:none;padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border)">' + detailRows + '</div>' +
+        '</div>';
+    });
+    html += '<div style="padding:10px 20px;font-size:12px;color:var(--text3);border-top:1px solid var(--border)">La comisión de estos pagos no se genera sola, pero la empresa puede otorgarla por excepción desde su vista Comisión (0,1% de lo sin cobertura = USD ' + fmtDec(totalNoCalif * 0.001, 2) + '). Las excepciones ya otorgadas aparecen con badge azul.</div>';
+  }
+  html += '</div>';
+
+  c.innerHTML = html;
+
+  const btnPrev = document.getElementById('btn-rep-prev');
+  const btnNext = document.getElementById('btn-rep-next');
+  if (btnPrev) btnPrev.onclick = function() { renderIntReportes(year - 1); };
+  if (btnNext && !esAnioActual) btnNext.onclick = function() { renderIntReportes(year + 1); };
+
+  const btnExp = document.getElementById('btn-export-reporte');
+  if (btnExp) btnExp.onclick = function() {
+    const wb = XLSX.utils.book_new();
+    const r1 = [['REPORTE ANUAL ' + year + ' — INTERMEDIARIO'], [], ['Mes','Pagos','Volumen USD','Cubierto 24hs USD','Comisión USD','Perdida USD','Cobrado USD','Saldo USD']];
+    mensual.forEach(r => r1.push([MESES[r.mes], r.pagos, r.volumen, r.cubierto, parseFloat(r.comision.toFixed(2)), parseFloat(r.perdida.toFixed(2)), parseFloat(r.cobrado.toFixed(2)), parseFloat((r.comision - r.cobrado).toFixed(2))]));
+    r1.push([]);
+    r1.push(['TOTAL', tot.pagos, tot.volumen, tot.cubierto, parseFloat(tot.comision.toFixed(2)), parseFloat(tot.perdida.toFixed(2)), parseFloat(tot.cobrado.toFixed(2)), parseFloat(saldoAnual.toFixed(2))]);
+    const ws1 = XLSX.utils.aoa_to_sheet(r1);
+    ws1['!cols'] = [{wch:12},{wch:8},{wch:14},{wch:16},{wch:14},{wch:12},{wch:12},{wch:12}];
+    XLSX.utils.book_append_sheet(wb, ws1, 'Mensual');
+    const r2 = [['POR CLIENTE — ' + year], [], ['Cliente','Pagos','Califican','Parciales','No califican','Excepciones','Prom envio hs','Volumen USD','Sin cobertura USD','Perdida USD','Comisión USD']];
+    clientes.forEach(cl => r2.push([cl.cliente, cl.pagos, cl.calif, cl.parcial, cl.noCalif, cl.excepciones, cl.demoraN > 0 ? Math.round(cl.demoraSum / cl.demoraN) : '', cl.monto, cl.noCalifMonto, parseFloat(cl.perdida.toFixed(2)), parseFloat(cl.comision.toFixed(2))]));
+    const ws2 = XLSX.utils.aoa_to_sheet(r2);
+    ws2['!cols'] = [{wch:30},{wch:8},{wch:10},{wch:10},{wch:12},{wch:12},{wch:13},{wch:14},{wch:16},{wch:12},{wch:14}];
+    XLSX.utils.book_append_sheet(wb, ws2, 'Por cliente');
+    const r3 = [['PAGOS QUE NO CALIFICARON — ' + year], [], ['Cliente','Fecha','Monto USD','Cubierto USD','Demora hs','Perdida USD','Excepcion','Estado','Motivo']];
+    noCalifican.forEach(d => r3.push([d.cliente, new Date(d.fecha).toLocaleString('es-AR'), d.monto, d.montoCubierto, d.demoraHs != null ? Math.round(d.demoraHs) : '', parseFloat((d.comisionPerdida||0).toFixed(2)), d.excepcion ? 'SI' + (d.excepcionNota ? ' (' + d.excepcionNota + ')' : '') : '', d.estado, d.motivo || '']));
+    const ws3 = XLSX.utils.aoa_to_sheet(r3);
+    ws3['!cols'] = [{wch:30},{wch:20},{wch:12},{wch:12},{wch:10},{wch:12},{wch:20},{wch:14},{wch:70}];
+    XLSX.utils.book_append_sheet(wb, ws3, 'No califican');
+    XLSX.writeFile(wb, 'reporte_intermediario_' + year + '.xlsx');
   };
 }
 
@@ -3100,6 +3510,24 @@ function esc(str) { return String(str??'').replace(/&/g,'&amp;').replace(/</g,'&
 function safeUrl(u) { const s=String(u||''); return /^https?:\/\//i.test(s) ? esc(s) : '#'; }
 function fmt(n) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtDec(n, d) { return Number(n).toLocaleString('es-AR', {minimumFractionDigits: d, maximumFractionDigits: d}); }
+// Interés por mora: 4% mensual, prorrateado por día, desde el día del vencimiento.
+// dias_vencidos = vto − hoy (≤ 0 = vencida); el atraso en días es su valor absoluto.
+var TASA_MORA_MENSUAL = 0.04;
+function interesMora(saldo, diasVencidos) {
+  var d = diasVencidos == null ? 0 : Number(diasVencidos);
+  var atraso = d < 0 ? -d : 0;
+  return (Number(saldo) || 0) * TASA_MORA_MENSUAL * (atraso / 30);
+}
+// Toggle de la fila-detalle de un cliente en Reportes (es un <tr>, no un div)
+function toggleClienteDetail(i) {
+  const el = document.getElementById('det-cli-' + i);
+  if (!el) return;
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'table-row' : 'none';
+  const arr = document.getElementById('arr-cli-' + i);
+  if (arr) arr.textContent = open ? '⌄' : '›';
+}
+
 function toggleComisionDetail(id) {
   const el = document.getElementById(id);
   if (!el) return;
